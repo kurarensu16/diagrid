@@ -17,14 +17,23 @@ import {
   Unlock,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  Sun, 
+  Moon, 
+  Palette, 
+  Monitor,
+  Heart
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Avatar, AVATAR_PRESETS } from '../components/ui/Avatar';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { SupportModal } from '../components/ui/SupportModal';
 import { mockAuth, useCurrentUser, type User } from '../services/mockAuth';
 import { authService } from '../services/authService';
+import { adminService } from '../services/adminService';
 import { storageService } from '../services/storageService';
+import { themeService } from '../services/themeService';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
@@ -43,14 +52,21 @@ export const Settings: React.FC = () => {
     currentUser?.presetAvatar || (currentUser?.role === 'admin' ? 'shield' : 'terminal')
   );
   const [customAvatar, setCustomAvatar] = useState(currentUser?.avatar || '');
-  const [defaultNotation, setDefaultNotation] = useState<'erd' | 'flowchart' | 'sequence'>(
-    currentUser?.defaultNotation || 'erd'
+  const [gridStyle, setGridStyle] = useState<'lines' | 'dots' | 'blank'>(
+    currentUser?.gridStyle || 'lines'
+  );
+  const [snapToGrid, setSnapToGrid] = useState<boolean>(
+    currentUser?.snapToGrid ?? true
   );
   const [theme, setTheme] = useState<'blueprint' | 'dark' | 'light'>(
-    currentUser?.theme || 'blueprint'
+    currentUser?.theme || themeService.getTheme() || 'blueprint'
   );
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'preferences' | 'storage'>('profile');
+  // Live interactive demo canvas state for testing grid, snapping, and theme live
+  const [demoPos, setDemoPos] = useState({ x: 60, y: 30 });
+  const [isDemoDragging, setIsDemoDragging] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<'profile' | 'preferences' | 'appearance' | 'storage'>('profile');
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [storageUsageKb, setStorageUsageKb] = useState<number>(0);
 
@@ -60,8 +76,17 @@ export const Settings: React.FC = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
+  const [isSupportEnabled, setIsSupportEnabled] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync settings for features like creator wallets
+  useEffect(() => {
+    adminService.getSystemSettings().then((s) => {
+      setIsSupportEnabled(s.creator_wallets_enabled !== false);
+    }).catch(() => {});
+  }, []);
 
   // Sync state if currentUser changes from outside
   useEffect(() => {
@@ -71,8 +96,9 @@ export const Settings: React.FC = () => {
       setAvatarType(currentUser.avatarType || (currentUser.avatar ? 'custom' : 'preset'));
       setPresetAvatar(currentUser.presetAvatar || (currentUser.role === 'admin' ? 'shield' : 'terminal'));
       setCustomAvatar(currentUser.avatar || '');
-      setDefaultNotation(currentUser.defaultNotation || 'erd');
-      setTheme(currentUser.theme || 'blueprint');
+      setGridStyle(currentUser.gridStyle || 'lines');
+      setSnapToGrid(currentUser.snapToGrid ?? true);
+      setTheme(currentUser.theme || themeService.getTheme() || 'blueprint');
     }
   }, [currentUser]);
 
@@ -180,7 +206,8 @@ export const Settings: React.FC = () => {
       avatarType,
       presetAvatar,
       avatar: avatarType === 'custom' ? customAvatar : undefined,
-      defaultNotation,
+      gridStyle,
+      snapToGrid,
       theme,
     };
 
@@ -190,25 +217,41 @@ export const Settings: React.FC = () => {
       avatarType,
       presetAvatar,
       avatar: avatarType === 'custom' ? customAvatar : undefined,
+      gridStyle,
+      snapToGrid,
       theme,
     });
 
     mockAuth.updateUser(updates);
     setIsEditing(false);
-    setStatusMsg({ text: 'Profile configuration updated successfully!', type: 'success' });
+    setStatusMsg({ text: 'Workspace preferences updated successfully!', type: 'success' });
     setTimeout(() => {
       setStatusMsg(null);
     }, 4000);
   };
 
+  const handleSaveAppearance = async () => {
+    themeService.setTheme(theme);
+    mockAuth.updateUser({ theme });
+    await authService.updateProfile({ theme });
+    setStatusMsg({ text: `Appearance saved! Theme set to ${theme.toUpperCase()}.`, type: 'success' });
+    setTimeout(() => {
+      setStatusMsg(null);
+    }, 4000);
+  };
+
+  const [isConfirmWipeOpen, setIsConfirmWipeOpen] = useState(false);
+
+  const handleResetStorageConfirm = () => {
+    localStorage.clear();
+    setStatusMsg({ text: 'LocalStorage database cleared. Re-seeding defaults...', type: 'success' });
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  };
+
   const handleResetStorage = () => {
-    if (confirm('WARNING: This will delete ALL custom projects, diagrams, and local settings and re-seed defaults. Proceed?')) {
-      localStorage.clear();
-      setStatusMsg({ text: 'LocalStorage database cleared. Re-seeding defaults...', type: 'success' });
-      setTimeout(() => {
-        window.location.reload();
-      }, 1200);
-    }
+    setIsConfirmWipeOpen(true);
   };
 
   const handleLogout = async () => {
@@ -292,6 +335,17 @@ export const Settings: React.FC = () => {
             workspace_prefs
           </button>
           <button
+            onClick={() => setActiveTab('appearance')}
+            className={`px-3 py-1.5 transition-colors flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'appearance'
+                ? 'bg-ink text-paper font-bold'
+                : 'text-ink-soft hover:text-ink'
+            }`}
+          >
+            <Sun className="w-3.5 h-3.5" />
+            appearance
+          </button>
+          <button
             onClick={() => setActiveTab('storage')}
             className={`px-3 py-1.5 transition-colors flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'storage'
@@ -351,6 +405,12 @@ export const Settings: React.FC = () => {
                     >
                       [{currentUser?.role?.toUpperCase() || 'USER'}]
                     </span>
+                    {currentUser?.isSupporter && (
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 border border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10 flex items-center gap-1">
+                        <Heart className="w-3 h-3 fill-rose-600 text-rose-600" />
+                        [❤️ SUPPORTER]
+                      </span>
+                    )}
                     {isEditing ? (
                       <span className="text-[10px] font-mono font-bold px-2 py-0.5 border border-blueprint text-blueprint bg-blueprint/10 flex items-center gap-1">
                         <Unlock className="w-3 h-3" />
@@ -681,6 +741,38 @@ export const Settings: React.FC = () => {
               </div>
             )}
           </Card>
+
+          {/* Support Creator Card in Profile */}
+          {isSupportEnabled && (
+            <Card variant="blueprint" className="p-6 border-rose-500/40 bg-rose-500/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 font-mono">
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 border border-rose-500 bg-rose-500/10 flex items-center justify-center shrink-0 text-rose-600 dark:text-rose-400">
+                  <Heart className="w-5 h-5 fill-rose-600 text-rose-600" />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] font-bold text-ink flex items-center gap-2">
+                    support_creator()
+                    <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500 font-bold uppercase">
+                      [❤️ SUPPORTER_PERKS]
+                    </span>
+                  </span>
+                  <p className="text-[11.5px] text-ink-soft font-sans max-w-lg">
+                    Diagrid is built by independent developers. Scan our digital wallet QR to support database costs and unlock your exclusive supporter badge!
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setIsSupportModalOpen(true)}
+                className="shrink-0 border-rose-500 text-rose-700 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[12px] flex items-center gap-1.5 px-4 py-2"
+              >
+                <Heart className="w-3.5 h-3.5 fill-current" />
+                open_qr_wallet()
+              </Button>
+            </Card>
+          )}
         </form>
       )}
 
@@ -690,30 +782,30 @@ export const Settings: React.FC = () => {
           <div>
             <h2 className="text-[18px] font-bold tracking-tight">workspace_preferences</h2>
             <p className="text-[11px] text-ink-soft font-mono mt-0.5">
-              // set default canvas behaviors, diagram engines, and export styles
+              // set default canvas grid styling, magnetic snapping, and visual theme
             </p>
           </div>
 
-          <div className="flex flex-col gap-5 font-mono text-[13px]">
-            {/* Preferred Diagram Engine */}
-            <div className="flex flex-col gap-2 pb-4 border-b border-line">
-              <span className="font-bold text-ink uppercase text-[12px]">default_diagram_notation:</span>
+          <div className="flex flex-col gap-6 font-mono text-[13px]">
+            {/* Canvas Grid Style */}
+            <div className="flex flex-col gap-2 pb-5 border-b border-line">
+              <span className="font-bold text-ink uppercase text-[12px]">canvas_grid_pattern:</span>
               <p className="text-[11px] text-ink-soft -mt-1 font-mono">
-                When initiating a new project, pre-select this template and visual preset.
+                Choose the background drafting grid pattern displayed in the visual canvas.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-1">
                 {[
-                  { id: 'erd', label: "ERD (Crow's Foot)", desc: 'Relational Database Schema' },
-                  { id: 'flowchart', label: 'Flowchart', desc: 'Step-by-step logic workflows' },
-                  { id: 'sequence', label: 'Sequence', desc: 'Message exchange protocols' },
+                  { id: 'lines', label: 'Grid Lines', desc: 'Standard 20px blueprint square grid' },
+                  { id: 'dots', label: 'Dot Matrix', desc: 'Subtle dotted alignment points' },
+                  { id: 'blank', label: 'Blank Canvas', desc: 'Clean white/solid drafting sheet' },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setDefaultNotation(item.id as any)}
+                    onClick={() => setGridStyle(item.id as any)}
                     className={`p-3 border text-left flex flex-col gap-1 transition-colors cursor-pointer ${
-                      defaultNotation === item.id 
-                        ? 'border-ink bg-paper-raised ring-1 ring-ink shadow-sm' 
+                      gridStyle === item.id 
+                        ? 'border-ink bg-paper-raised ring-2 ring-blueprint shadow-sm font-bold' 
                         : 'border-line bg-paper hover:border-ink'
                     }`}
                   >
@@ -724,25 +816,24 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
-            {/* Canvas Theme */}
-            <div className="flex flex-col gap-2 pb-4 border-b border-line">
-              <span className="font-bold text-ink uppercase text-[12px]">blueprint_theme_styling:</span>
+            {/* Snap to Grid Behavior */}
+            <div className="flex flex-col gap-2 pb-5 border-b border-line">
+              <span className="font-bold text-ink uppercase text-[12px]">magnetic_snapping:</span>
               <p className="text-[11px] text-ink-soft -mt-1 font-mono">
-                Configure default background grid pattern and visual ink contrast.
+                Control coordinate alignment when dragging and positioning schematic elements.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
                 {[
-                  { id: 'blueprint', label: 'Paper Blueprint', desc: 'Light blueprint paper with ink lines' },
-                  { id: 'dark', label: 'Terminal Dark', desc: 'High-contrast darkroom console' },
-                  { id: 'light', label: 'Clean Drafting', desc: 'Ultra-minimal monochrome canvas' },
+                  { val: true, label: '20px Snap to Grid (Recommended)', desc: 'Keeps nodes, ports, and orthogonal lines cleanly aligned' },
+                  { val: false, label: 'Freeform Positioning', desc: 'Fluid 1px precision without snapping constraints' },
                 ].map((item) => (
                   <button
-                    key={item.id}
+                    key={String(item.val)}
                     type="button"
-                    onClick={() => setTheme(item.id as any)}
+                    onClick={() => setSnapToGrid(item.val)}
                     className={`p-3 border text-left flex flex-col gap-1 transition-colors cursor-pointer ${
-                      theme === item.id 
-                        ? 'border-ink bg-paper-raised ring-1 ring-ink shadow-sm' 
+                      snapToGrid === item.val 
+                        ? 'border-ink bg-paper-raised ring-2 ring-blueprint shadow-sm font-bold' 
                         : 'border-line bg-paper hover:border-ink'
                     }`}
                   >
@@ -750,6 +841,55 @@ export const Settings: React.FC = () => {
                     <span className="text-[10px] text-ink-soft">{item.desc}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+
+            {/* Live Interactive Blueprint Preview */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-ink uppercase text-[12px]">live_canvas_preview:</span>
+                <span className="text-[11px] text-blueprint font-mono">
+                  // drag node below to test {snapToGrid ? '20px magnetic snap' : 'fluid freeform drag'}
+                </span>
+              </div>
+              <div
+                onMouseMove={(e) => {
+                  if (!isDemoDragging) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const rawX = e.clientX - rect.left - 60;
+                  const rawY = e.clientY - rect.top - 20;
+                  const nextX = snapToGrid ? Math.round(rawX / 20) * 20 : Math.round(rawX);
+                  const nextY = snapToGrid ? Math.round(rawY / 20) * 20 : Math.round(rawY);
+                  setDemoPos({
+                    x: Math.max(10, Math.min(nextX, rect.width - 150)),
+                    y: Math.max(10, Math.min(nextY, rect.height - 60)),
+                  });
+                }}
+                onMouseUp={() => setIsDemoDragging(false)}
+                onMouseLeave={() => setIsDemoDragging(false)}
+                className={`w-full h-44 border-2 border-ink rounded-none relative overflow-hidden select-none diagram-canvas ${
+                  gridStyle === 'dots' ? 'bg-grid-dots' :
+                  gridStyle === 'blank' ? 'bg-grid-blank' :
+                  'bg-grid-lines'
+                }`}
+              >
+                {/* Visual coordinate HUD */}
+                <div className="absolute top-2 left-2 px-2 py-0.5 border border-line bg-paper/90 font-mono text-[10px] text-ink-soft pointer-events-none z-10">
+                  x: {demoPos.x}px | y: {demoPos.y}px | grid: {gridStyle} | snap: {snapToGrid ? '20px' : 'off'} | theme: {theme}
+                </div>
+
+                {/* Draggable Demo Node */}
+                <div
+                  onMouseDown={() => setIsDemoDragging(true)}
+                  style={{ transform: `translate(${demoPos.x}px, ${demoPos.y}px)` }}
+                  className="absolute top-0 left-0 w-36 h-12 border-2 border-ink bg-paper-raised shadow-hard-blueprint cursor-grab active:cursor-grabbing flex items-center justify-center font-mono text-[11px] font-bold text-ink hover:border-blueprint transition-shadow"
+                >
+                  <div className="flex items-center gap-1.5 pointer-events-none">
+                    <span className="w-2 h-2 rounded-full bg-blueprint"></span>
+                    <span>Test Node</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -762,7 +902,192 @@ export const Settings: React.FC = () => {
         </Card>
       )}
 
-      {/* TAB 3: STORAGE & SYSTEM */}
+      {/* TAB: APPEARANCE */}
+      {activeTab === 'appearance' && (
+        <Card variant="blueprint" className="p-6 flex flex-col gap-6">
+          <div>
+            <h2 className="text-[18px] font-bold tracking-tight">appearance</h2>
+            <p className="text-[11px] text-ink-soft font-mono mt-0.5">
+              // control the app-wide color mode — applies instantly everywhere
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 font-mono">
+            <span className="text-[11px] font-bold text-ink uppercase tracking-wider">color_mode:</span>
+
+            {/* 3 large theme tiles */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                {
+                  id: 'blueprint' as const,
+                  label: 'Blueprint',
+                  desc: 'Light paper with blueprint ink',
+                  icon: Palette,
+                  bg: '#F6F7F5',
+                  panel: '#FFFFFF',
+                  accent: '#1E5C8C',
+                  textMain: '#15191C',
+                  textSoft: '#4A5359',
+                  border: '#D7DBD8',
+                  tag: 'LIGHT',
+                },
+                {
+                  id: 'light' as const,
+                  label: 'Light',
+                  desc: 'Clean minimal white mode',
+                  icon: Sun,
+                  bg: '#F8FAFC',
+                  panel: '#FFFFFF',
+                  accent: '#2563EB',
+                  textMain: '#0F172A',
+                  textSoft: '#64748B',
+                  border: '#E2E8F0',
+                  tag: 'LIGHT',
+                },
+                {
+                  id: 'dark' as const,
+                  label: 'Dark',
+                  desc: 'High-contrast dark console',
+                  icon: Moon,
+                  bg: '#0E1317',
+                  panel: '#161D22',
+                  accent: '#388BFD',
+                  textMain: '#F0F6FC',
+                  textSoft: '#8B949E',
+                  border: '#263038',
+                  tag: 'DARK',
+                },
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = theme === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTheme(item.id)}
+                    className={`relative group border-2 text-left flex flex-col overflow-hidden transition-all cursor-pointer ${
+                      isActive
+                        ? 'border-blueprint shadow-hard-blueprint scale-[1.02]'
+                        : 'border-line hover:border-ink hover:shadow-hard-ink'
+                    }`}
+                  >
+                    {/* Large mock UI preview */}
+                    <div
+                      className="w-full h-28 p-3 flex flex-col gap-2 relative"
+                      style={{ backgroundColor: item.bg }}
+                    >
+                      {/* Mock topbar */}
+                      <div
+                        className="w-full h-5 flex items-center gap-1.5 px-2 rounded-sm"
+                        style={{ backgroundColor: item.panel, border: `1px solid ${item.border}` }}
+                      >
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.accent }} />
+                        <div className="flex-1 h-1.5 rounded-full" style={{ backgroundColor: item.textSoft, opacity: 0.25 }} />
+                        <div className="w-8 h-1.5 rounded-full" style={{ backgroundColor: item.accent, opacity: 0.5 }} />
+                      </div>
+                      {/* Mock content rows */}
+                      <div className="flex gap-2 flex-1">
+                        {/* Mock sidebar */}
+                        <div
+                          className="w-10 h-full rounded-sm flex flex-col gap-1 p-1"
+                          style={{ backgroundColor: item.panel, border: `1px solid ${item.border}` }}
+                        >
+                          {[0.8, 0.4, 0.4].map((op, i) => (
+                            <div key={i} className="h-1.5 rounded-full w-full" style={{ backgroundColor: item.textMain, opacity: op * 0.5 }} />
+                          ))}
+                        </div>
+                        {/* Mock canvas */}
+                        <div
+                          className="flex-1 h-full rounded-sm flex items-center justify-center"
+                          style={{ 
+                            backgroundColor: item.bg,
+                            border: `1px solid ${item.border}`,
+                            backgroundImage: `radial-gradient(${item.border} 1px, transparent 1px)`,
+                            backgroundSize: '8px 8px',
+                          }}
+                        >
+                          <div
+                            className="w-14 h-5 rounded-sm flex items-center justify-center text-[6px] font-bold"
+                            style={{ backgroundColor: item.panel, border: `1.5px solid ${item.accent}`, color: item.textMain }}
+                          >
+                            NODE
+                          </div>
+                        </div>
+                      </div>
+                      {/* Active checkmark badge */}
+                      {isActive && (
+                        <div
+                          className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center"
+                          style={{ backgroundColor: item.accent }}
+                        >
+                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Label footer */}
+                    <div
+                      className="px-3 py-2.5 flex items-center gap-2 border-t"
+                      style={{ borderColor: item.border, backgroundColor: item.panel }}
+                    >
+                      <Icon
+                        className="w-3.5 h-3.5 shrink-0"
+                        style={{ color: isActive ? item.accent : item.textSoft }}
+                      />
+                      <div className="flex-1">
+                        <div
+                          className="text-[12px] font-bold"
+                          style={{ color: item.textMain }}
+                        >
+                          {item.label}
+                        </div>
+                        <div className="text-[10px]" style={{ color: item.textSoft }}>
+                          {item.desc}
+                        </div>
+                      </div>
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm"
+                        style={{
+                          backgroundColor: isActive ? item.accent : item.border,
+                          color: isActive ? '#fff' : item.textSoft,
+                        }}
+                      >
+                        {item.tag}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Current mode indicator */}
+            <div className="flex items-center gap-2 text-[11px] text-ink-soft border border-line bg-paper p-2.5">
+              <Monitor className="w-3.5 h-3.5 shrink-0 text-blueprint" />
+              <span>
+                Current mode: <strong className="text-ink uppercase">{theme}</strong>
+                {' — '}click save below to apply and persist
+              </span>
+            </div>
+
+            {/* Appearance Save Button */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-line pt-4 mt-2">
+              <span className="font-mono text-[11px] text-ink-soft">
+                // theme applies across dashboard, settings, and visual schematic editor
+              </span>
+              <Button 
+                type="button"
+                variant="primary" 
+                onClick={handleSaveAppearance}
+                className="flex items-center gap-1.5 px-4 py-2 text-[12px] self-end sm:self-auto cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                save_appearance()
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {activeTab === 'storage' && (
         <div className="flex flex-col gap-6">
           {/* Account Info card */}
@@ -901,6 +1226,28 @@ export const Settings: React.FC = () => {
           </Card>
         </div>
       )}
+
+      {/* Database Wipe Confirmation Modal */}
+      <ConfirmModal
+        isOpen={isConfirmWipeOpen}
+        onClose={() => setIsConfirmWipeOpen(false)}
+        onConfirm={handleResetStorageConfirm}
+        title="WIPE_LOCAL_DATABASE"
+        message="Wipe local sandbox database and reset defaults?"
+        description="WARNING: This will permanently delete ALL custom projects, diagrams, and local settings and re-seed defaults. This cannot be undone."
+        confirmText="Wipe Everything"
+        danger={true}
+        requireMatchString="RESET"
+      />
+
+      {/* Support Creator Modal */}
+      <SupportModal
+        isOpen={isSupportModalOpen}
+        onClose={() => setIsSupportModalOpen(false)}
+        onClaimSuccess={() => {
+          setStatusMsg({ text: 'Supporter perks unlocked! Thank you for supporting Diagrid.', type: 'success' });
+        }}
+      />
     </div>
   );
 };

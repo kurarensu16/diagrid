@@ -1,22 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
-import { mockAdmin, type PlatformStats, type ActivityLog } from '../../services/mockAdmin';
-import { Users, Folder, FileText, Activity } from 'lucide-react';
+import { adminService, type PlatformStats, type ActivityLog } from '../../services/adminService';
+import { Users, Folder, FileText, Activity, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export const AdminOverview: React.FC = () => {
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [recentLogs, setRecentLogs] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setStats(mockAdmin.getPlatformStats());
-    setRecentLogs(mockAdmin.getActivityLogs().slice(0, 5));
+    let isMounted = true;
+    Promise.all([
+      adminService.getPlatformStats(),
+      adminService.getActivityLogs(5)
+    ]).then(([s, logs]) => {
+      if (isMounted) {
+        setStats(s);
+        setRecentLogs(logs);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (isMounted) setLoading(false);
+    });
+    return () => { isMounted = false; };
   }, []);
+
+  if (loading) {
+    return (
+      <div className="p-12 flex flex-col items-center justify-center gap-3 text-ink-soft font-mono">
+        <Loader2 className="w-6 h-6 animate-spin text-blueprint" />
+        <span>// loading_platform_metrics()...</span>
+      </div>
+    );
+  }
 
   if (!stats) return null;
 
   // Find max value in diagram type count to calculate percentage bars
-  const maxDiagramCount = Math.max(...Object.values(stats.diagrams_by_type));
+  const diagramCounts = Object.values(stats.diagrams_by_type);
+  const maxDiagramCount = diagramCounts.length > 0 ? Math.max(...diagramCounts, 1) : 1;
 
   return (
     <div className="p-8 flex flex-col gap-6 text-ink">
@@ -101,7 +124,7 @@ export const AdminOverview: React.FC = () => {
                 <h2 className="text-[18px] font-bold tracking-tight text-signal">signups_trend</h2>
                 <p className="text-[11px] text-ink-soft font-mono mt-0.5">// new developer registrations (last 7 days)</p>
               </div>
-              <div className="font-mono text-[12px] font-bold text-signal bg-signal bg-opacity-10 border border-signal px-2 py-0.5">
+              <div className="font-mono text-[12px] font-bold text-[#D45B33] dark:text-[#F78166] bg-[#FDF2EC] dark:bg-[#2C1610] border border-signal px-2 py-0.5">
                 +{stats.signups_last_7_days.reduce((a, b) => a + b, 0)} total
               </div>
             </div>
@@ -120,7 +143,7 @@ export const AdminOverview: React.FC = () => {
                       <div className="w-full max-w-[36px] bg-paper-raised border border-line overflow-hidden flex items-end">
                         <div 
                           style={{ height: `${heightPct}%` }}
-                          className="w-full bg-signal group-hover:bg-opacity-80 transition-all border-t border-ink"
+                          className="w-full bg-signal group-hover:opacity-80 transition-all border-t border-ink"
                         />
                       </div>
                       <span className="font-mono text-[10px] text-ink-soft uppercase group-hover:text-ink">

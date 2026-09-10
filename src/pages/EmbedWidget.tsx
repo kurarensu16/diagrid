@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { diagramService } from '../services/diagramService';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../services/mockDb';
@@ -584,8 +584,44 @@ export const EmbedWidget: React.FC = () => {
               shapeClasses = isDark
                 ? "bg-[#1C2226] text-white border-y-2 border-x-0 border-[#E1E5E3] flex items-center justify-center text-center px-3"
                 : "bg-paper-raised text-ink border-y-2 border-x-0 border-ink flex items-center justify-center text-center px-3";
+            } else if (node.type === 'dfd-entity') {
+              shapeClasses = isDark
+                ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex flex-col justify-center items-center p-3 relative"
+                : "bg-paper-raised text-ink border-2 border-ink flex flex-col justify-center items-center p-3 relative";
+            } else if (node.type === 'dfd-process') {
+              shapeClasses = isDark
+                ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] rounded-lg flex flex-col p-0 text-left items-stretch overflow-hidden"
+                : "bg-paper-raised text-ink border-2 border-ink rounded-lg flex flex-col p-0 text-left items-stretch overflow-hidden";
             } else if (node.type === 'usecase-boundary') {
               shapeClasses = "bg-transparent border-2 border-dashed border-blueprint flex flex-col p-3 text-left";
+              customBoxShadow = 'none';
+            } else if (node.type === 'usecase-oval') {
+              shapeClasses = isDark
+                ? "rounded-[50%] bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex items-center justify-center p-3 text-center"
+                : "rounded-[50%] bg-paper-raised text-ink border-2 border-ink flex items-center justify-center p-3 text-center";
+            } else if (node.type === 'sequence-activation') {
+              shapeClasses = isDark
+                ? "bg-[#1C2226] border border-[#E1E5E3] flex items-center justify-center p-0"
+                : "bg-paper-raised border border-ink flex items-center justify-center p-0";
+              customBoxShadow = 'none';
+            } else if (node.type === 'activity-start') {
+              shapeClasses = isDark
+                ? "rounded-full bg-white flex items-center justify-center p-0 border-0"
+                : "rounded-full bg-ink flex items-center justify-center p-0 border-0";
+              customBoxShadow = 'none';
+            } else if (node.type === 'activity-end') {
+              shapeClasses = isDark
+                ? "rounded-full bg-transparent border-2 border-white flex items-center justify-center p-0"
+                : "rounded-full bg-transparent border-2 border-ink flex items-center justify-center p-0";
+              customBoxShadow = 'none';
+            } else if (node.type === 'activity-action') {
+              shapeClasses = isDark
+                ? "rounded-xl bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex items-center justify-center text-center p-2"
+                : "rounded-xl bg-paper-raised text-ink border-2 border-ink flex items-center justify-center text-center p-2";
+            } else if (node.type === 'activity-fork') {
+              shapeClasses = isDark
+                ? "bg-white flex items-center justify-center p-0 border-0 rounded-[1px]"
+                : "bg-ink flex items-center justify-center p-0 border-0 rounded-[1px]";
               customBoxShadow = 'none';
             }
 
@@ -604,7 +640,7 @@ export const EmbedWidget: React.FC = () => {
                   top: `${node.y}px`,
                   width: `${width}px`,
                   height: `${height}px`,
-                  backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
+                  backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
                   boxShadow: customBoxShadow || undefined,
                 }}
                 className={`absolute pointer-events-auto select-none ${shapeClasses}`}
@@ -675,6 +711,57 @@ export const EmbedWidget: React.FC = () => {
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                ) : node.type === 'dfd-entity' ? (
+                  <div className="flex-1 flex flex-col h-full overflow-hidden select-none justify-center items-center w-full">
+                    <div className={`absolute inset-1 border ${isDark ? 'border-[#E1E5E3]' : 'border-ink'} pointer-events-none`} />
+                    <div
+                      className={`font-mono ${fontSizeClass} px-2 select-none truncate w-full leading-normal`}
+                      style={textStyleObj}
+                    >
+                      {node.label}
+                    </div>
+                  </div>
+                ) : node.type === 'dfd-process' ? (
+                  <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
+                    {(() => {
+                      const splitIdx = node.label.indexOf(' ');
+                      const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
+                      const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+                      return (
+                        <>
+                          <div className={`border-b ${isDark ? 'bg-[#15191C] border-[#E1E5E3] text-[#9BA3A9]' : 'bg-paper border-ink text-ink-soft'} py-1 text-center font-bold font-mono text-[9.5px] select-none truncate`}>
+                            {processId}
+                          </div>
+                          <div
+                            className={`p-2 flex-1 flex items-center justify-center font-mono select-none truncate leading-snug`}
+                            style={textStyleObj}
+                          >
+                            {processName}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : node.type === 'activity-end' ? (
+                  <div className={`w-[18px] h-[18px] rounded-full ${isDark ? 'bg-white' : 'bg-ink'} select-none`} />
+                ) : node.type === 'activity-start' || node.type === 'activity-fork' || node.type === 'sequence-activation' ? (
+                  <div className="w-full h-full select-none" />
+                ) : node.type === 'usecase-actor' ? (
+                  <div className="flex flex-col items-center justify-center w-full h-full select-none">
+                    <svg className={`w-8 h-12 ${isDark ? 'stroke-white' : 'stroke-ink'} fill-none`} strokeWidth="1.5" viewBox="0 0 24 36">
+                      <circle cx="12" cy="6" r="4" />
+                      <line x1="12" y1="10" x2="12" y2="22" />
+                      <line x1="4" y1="14" x2="20" y2="14" />
+                      <line x1="12" y1="22" x2="6" y2="32" />
+                      <line x1="12" y1="22" x2="18" y2="32" />
+                    </svg>
+                    <div
+                      className={`font-mono ${fontSizeClass} pt-1 select-none truncate w-full leading-tight text-center`}
+                      style={textStyleObj}
+                    >
+                      {node.label}
                     </div>
                   </div>
                 ) : (

@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { projectService, type ProjectWithStats } from '../services/projectService';
-import { Plus, Search, Trash2, Edit3, Folder, Calendar, RefreshCw } from 'lucide-react';
+import { Plus, Search, Trash2, Edit3, Folder, Calendar, RefreshCw, ArrowUpDown } from 'lucide-react';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
+
+type ProjectSortOption = 'updated_desc' | 'updated_asc' | 'name_asc' | 'name_desc' | 'diagrams_desc' | 'created_desc';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectWithStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<ProjectSortOption>('updated_desc');
   
   // Modals / Dialog states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -21,6 +25,8 @@ export const Dashboard: React.FC = () => {
   const [editingProjectId, setEditingProjectId] = useState('');
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+
+  const [projectToDelete, setProjectToDelete] = useState<ProjectWithStats | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -72,12 +78,11 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleDeleteProject = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (confirm('Are you sure you want to delete this project? This will delete all diagrams within it.')) {
-      await projectService.deleteProject(id);
-      await loadProjects();
-    }
+  const handleDeleteProjectConfirm = async () => {
+    if (!projectToDelete) return;
+    await projectService.deleteProject(projectToDelete.id);
+    setProjectToDelete(null);
+    await loadProjects();
   };
 
   const openEditModal = (e: React.MouseEvent, project: ProjectWithStats) => {
@@ -88,10 +93,31 @@ export const Dashboard: React.FC = () => {
     setIsEditModalOpen(true);
   };
 
-  const filteredProjects = projects.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProjects = useMemo(() => {
+    const list = projects.filter((p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.description.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    return list.sort((a, b) => {
+      switch (sortBy) {
+        case 'updated_desc':
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        case 'updated_asc':
+          return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+        case 'created_desc':
+          return new Date(b.created_at || b.updated_at).getTime() - new Date(a.created_at || a.updated_at).getTime();
+        case 'name_asc':
+          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        case 'name_desc':
+          return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' });
+        case 'diagrams_desc':
+          return (b.diagramCount ?? 0) - (a.diagramCount ?? 0);
+        default:
+          return 0;
+      }
+    });
+  }, [projects, searchQuery, sortBy]);
 
   return (
     <div className="p-8 flex flex-col gap-6 text-ink">
@@ -102,7 +128,7 @@ export const Dashboard: React.FC = () => {
           <p className="text-[13px] text-ink-soft font-mono mt-1">// manage your cloud diagram workspaces</p>
         </div>
         
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {/* Search box */}
           <div className="relative flex-1 md:flex-none">
             <Search className="w-4 h-4 text-ink-soft absolute left-3 top-1/2 -translate-y-1/2" />
@@ -110,9 +136,27 @@ export const Dashboard: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-4 py-2.5 border border-line bg-paper-raised text-[13px] font-mono focus:border-ink focus:outline-none w-full md:w-[240px]"
+              className="pl-9 pr-4 py-2 border border-line bg-paper-raised text-[13px] font-mono focus:border-ink focus:outline-none w-full md:w-[220px]"
               placeholder="find_project..."
             />
+          </div>
+
+          {/* Sort selector */}
+          <div className="flex items-center gap-1.5 border border-line bg-paper-raised px-2.5 py-2 text-[12px] font-mono text-ink">
+            <ArrowUpDown className="w-3.5 h-3.5 text-blueprint shrink-0" />
+            <span className="text-ink-soft text-[10px] uppercase font-bold hidden sm:inline">SORT:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as ProjectSortOption)}
+              className="bg-transparent border-none text-ink font-mono text-[12px] focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="updated_desc" className="bg-paper text-ink">Recently Updated</option>
+              <option value="updated_asc" className="bg-paper text-ink">Oldest Updated</option>
+              <option value="name_asc" className="bg-paper text-ink">Name (A → Z)</option>
+              <option value="name_desc" className="bg-paper text-ink">Name (Z → A)</option>
+              <option value="diagrams_desc" className="bg-paper text-ink">Most Diagrams</option>
+              <option value="created_desc" className="bg-paper text-ink">Newly Created</option>
+            </select>
           </div>
           
           <Button onClick={() => setIsCreateModalOpen(true)} className="flex items-center gap-1.5 shrink-0">
@@ -157,14 +201,17 @@ export const Dashboard: React.FC = () => {
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={(e) => openEditModal(e, project)}
-                        className="p-1 hover:text-blueprint text-ink-soft transition-colors"
+                        className="p-1 hover:text-blueprint text-ink-soft transition-colors cursor-pointer"
                         title="Rename Project"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={(e) => handleDeleteProject(e, project.id)}
-                        className="p-1 hover:text-signal text-ink-soft transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setProjectToDelete(project);
+                        }}
+                        className="p-1 hover:text-signal text-ink-soft transition-colors cursor-pointer"
                         title="Delete Project"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -282,6 +329,19 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Project Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(projectToDelete)}
+        onClose={() => setProjectToDelete(null)}
+        onConfirm={handleDeleteProjectConfirm}
+        title="DELETE_PROJECT_WORKSPACE"
+        message={`Delete "${projectToDelete?.name}"?`}
+        description={`This will permanently remove the project and all ${projectToDelete?.diagramCount ?? 0} diagram(s) contained within it.`}
+        confirmText="Delete Workspace"
+        danger={true}
+        requireMatchString={projectToDelete?.name}
+      />
     </div>
   );
 };

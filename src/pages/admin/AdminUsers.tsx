@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
-import { mockAdmin, type AdminUser } from '../../services/mockAdmin';
-import { Search, Eye, X, UserCheck, UserX, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { adminService, type AdminUser } from '../../services/adminService';
+import { Search, Eye, X, UserCheck, UserX, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, RefreshCw, Heart } from 'lucide-react';
 
 export const AdminUsers: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended'>('all');
   const [roleFilter, setRoleFilter] = useState<'all' | 'user' | 'admin'>('all');
@@ -23,18 +24,33 @@ export const AdminUsers: React.FC = () => {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, roleFilter, pageSize]);
 
-  const loadUsers = () => {
-    setUsers(mockAdmin.getUsers());
+  const loadUsers = async () => {
+    setIsLoading(true);
+    try {
+      const data = await adminService.getUsers();
+      setUsers(data);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleToggleStatus = (id: string, currentStatus: 'active' | 'suspended') => {
+  const handleToggleStatus = async (id: string, currentStatus: 'active' | 'suspended') => {
     const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
     if (confirm(`Are you sure you want to change this user status to ${nextStatus.toUpperCase()}?`)) {
-      mockAdmin.setUserStatus(id, nextStatus);
-      loadUsers();
+      await adminService.setUserStatus(id, nextStatus);
+      await loadUsers();
       if (selectedUser && selectedUser.id === id) {
         setSelectedUser({ ...selectedUser, status: nextStatus });
       }
+    }
+  };
+
+  const handleToggleSupporter = async (id: string, isSupporter: boolean) => {
+    const nextState = !isSupporter;
+    await adminService.setUserSupporterStatus(id, nextState);
+    await loadUsers();
+    if (selectedUser && selectedUser.id === id) {
+      setSelectedUser({ ...selectedUser, is_supporter: nextState });
     }
   };
 
@@ -59,8 +75,19 @@ export const AdminUsers: React.FC = () => {
           <h1 className="text-[32px] font-bold tracking-tight">user_management</h1>
           <p className="text-[13px] text-ink-soft font-mono mt-1">// manage registered developer accounts and security policies</p>
         </div>
-        <div className="font-mono text-[12px] text-ink-soft">
-          PAGE {validCurrentPage} OF {totalPages} • TOTAL_RECORDS: {filteredUsers.length} of {users.length}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadUsers}
+            disabled={isLoading}
+            className="flex items-center gap-1.5 font-mono text-[11px] border border-line px-3 py-1.5 hover:border-ink hover:bg-paper-raised transition-colors cursor-pointer"
+            title="Reload users from Supabase"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            sync_users()
+          </button>
+          <div className="font-mono text-[12px] text-ink-soft">
+            PAGE {validCurrentPage} OF {totalPages} • TOTAL_RECORDS: {filteredUsers.length} of {users.length}
+          </div>
         </div>
       </div>
 
@@ -133,7 +160,16 @@ export const AdminUsers: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-ink-soft font-mono">
+                  <span className="inline-flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-blueprint" />
+                    // querying public.profiles and user metrics from supabase...
+                  </span>
+                </td>
+              </tr>
+            ) : filteredUsers.length === 0 ? (
               <tr>
                 <td colSpan={7} className="p-8 text-center text-ink-soft italic">
                   // no users matching search filters found
@@ -142,10 +178,22 @@ export const AdminUsers: React.FC = () => {
             ) : (
               paginatedUsers.map((u) => (
                 <tr key={u.id} className="border-b border-line last:border-0 hover:bg-paper hover:bg-opacity-40">
-                  <td className="p-4 font-bold text-[13px] break-all">{u.email}</td>
+                  <td className="p-4 font-bold text-[13px] break-all">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{u.email}</span>
+                      {u.is_supporter && (
+                        <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 border border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10 flex items-center gap-1">
+                          <Heart className="w-2.5 h-2.5 fill-rose-600 text-rose-600" />
+                          SUPPORTER
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-4">
-                    <span className={`px-2 py-0.5 border text-[10px] uppercase tracking-wide ${
-                      u.role === 'admin' ? 'border-signal text-signal bg-signal bg-opacity-5' : 'border-line text-ink-soft'
+                    <span className={`px-2 py-0.5 border text-[10px] uppercase font-bold tracking-wide ${
+                      u.role === 'admin' 
+                        ? 'border-[#D45B33] text-[#D45B33] dark:text-[#F78166] bg-[#FDF2EC] dark:bg-[#2C1610]' 
+                        : 'border-line text-ink-soft bg-paper'
                     }`}>
                       {u.role}
                     </span>
@@ -153,8 +201,8 @@ export const AdminUsers: React.FC = () => {
                   <td className="p-4 text-center">
                     <span className={`px-2 py-1 text-[10px] uppercase font-bold tracking-wide border ${
                       u.status === 'active' 
-                        ? 'border-blueprint text-blueprint bg-blueprint bg-opacity-5' 
-                        : 'border-signal text-signal bg-signal bg-opacity-5'
+                        ? 'border-emerald-600 text-emerald-800 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40' 
+                        : 'border-rose-600 text-rose-800 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40'
                     }`}>
                       {u.status}
                     </span>
@@ -168,14 +216,27 @@ export const AdminUsers: React.FC = () => {
                     })}
                   </td>
                   <td className="p-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <button
                         onClick={() => setSelectedUser(u)}
-                        className="font-mono text-[10px] border border-line text-ink hover:border-blueprint hover:text-blueprint px-2.5 py-1 uppercase tracking-wide cursor-pointer transition-colors flex items-center gap-1"
+                        className="font-mono text-[10px] border border-line text-ink hover:border-blueprint hover:text-blueprint px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors flex items-center gap-1"
                         title="View user details"
                       >
                         <Eye className="w-3 h-3" />
                         details
+                      </button>
+
+                      <button
+                        onClick={() => handleToggleSupporter(u.id, !!u.is_supporter)}
+                        className={`font-mono text-[10px] border px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors flex items-center gap-1 ${
+                          u.is_supporter
+                            ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10'
+                            : 'border-line text-ink-soft hover:border-rose-500 hover:text-rose-600'
+                        }`}
+                        title="Toggle Supporter Perk"
+                      >
+                        <Heart className={`w-3 h-3 ${u.is_supporter ? 'fill-rose-600 text-rose-600' : ''}`} />
+                        {u.is_supporter ? 'perk_on' : 'grant_perk'}
                       </button>
 
                       {u.role === 'admin' ? (
@@ -183,7 +244,7 @@ export const AdminUsers: React.FC = () => {
                       ) : (
                         <button
                           onClick={() => handleToggleStatus(u.id, u.status)}
-                          className={`font-mono text-[10px] border px-2.5 py-1 uppercase tracking-wide cursor-pointer transition-colors ${
+                          className={`font-mono text-[10px] border px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors ${
                             u.status === 'active'
                               ? 'border-signal text-signal hover:bg-signal hover:text-paper'
                               : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
@@ -363,7 +424,9 @@ export const AdminUsers: React.FC = () => {
                 <div>
                   <span className="text-ink-soft uppercase text-[10px] block mb-1">// security_role</span>
                   <span className={`inline-block px-2 py-0.5 border text-[10px] uppercase font-bold ${
-                    selectedUser.role === 'admin' ? 'border-signal text-signal bg-signal bg-opacity-5' : 'border-line text-ink'
+                    selectedUser.role === 'admin' 
+                      ? 'border-[#D45B33] text-[#D45B33] dark:text-[#F78166] bg-[#FDF2EC] dark:bg-[#2C1610]' 
+                      : 'border-line text-ink bg-paper'
                   }`}>
                     {selectedUser.role}
                   </span>
@@ -371,7 +434,9 @@ export const AdminUsers: React.FC = () => {
                 <div>
                   <span className="text-ink-soft uppercase text-[10px] block mb-1">// account_status</span>
                   <span className={`inline-block px-2 py-0.5 border text-[10px] uppercase font-bold ${
-                    selectedUser.status === 'active' ? 'border-blueprint text-blueprint bg-blueprint bg-opacity-5' : 'border-signal text-signal bg-signal bg-opacity-5'
+                    selectedUser.status === 'active' 
+                      ? 'border-emerald-600 text-emerald-800 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40' 
+                      : 'border-rose-600 text-rose-800 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40'
                   }`}>
                     {selectedUser.status}
                   </span>
@@ -396,6 +461,27 @@ export const AdminUsers: React.FC = () => {
                   <span className="text-ink-soft uppercase text-[10px] block">// last_active</span>
                   <span className="text-ink-soft text-[11px]">{new Date(selectedUser.last_active).toLocaleString()}</span>
                 </div>
+              </div>
+
+              {/* Supporter status row */}
+              <div className="flex items-center justify-between border-b border-line border-dashed pb-2">
+                <div>
+                  <span className="text-ink-soft uppercase text-[10px] block">// supporter_perk</span>
+                  <span className="font-bold text-ink text-[12px] flex items-center gap-1.5 mt-0.5">
+                    <Heart className={`w-3.5 h-3.5 ${selectedUser.is_supporter ? 'fill-rose-600 text-rose-600' : 'text-ink-soft'}`} />
+                    {selectedUser.is_supporter ? 'ACTIVATED [❤️ SUPPORTER]' : 'STANDARD DEVELOPER'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleToggleSupporter(selectedUser.id, !!selectedUser.is_supporter)}
+                  className={`px-3 py-1 border text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                    selectedUser.is_supporter
+                      ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10'
+                      : 'border-line text-ink-soft hover:border-rose-500 hover:text-rose-600'
+                  }`}
+                >
+                  {selectedUser.is_supporter ? 'REVOKE_PERK()' : 'GRANT_PERK()'}
+                </button>
               </div>
             </div>
 

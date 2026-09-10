@@ -18,7 +18,7 @@ import {
   ChevronsRight
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
-import { mockAdmin, type AdminFeedback } from '../../services/mockAdmin';
+import { adminService, type AdminFeedback } from '../../services/adminService';
 
 type CategoryFilter = 'all' | 'feature' | 'bug' | 'general';
 type StatusFilter = 'all' | 'new' | 'reviewed' | 'resolved';
@@ -41,24 +41,26 @@ export const AdminFeedbackPage: React.FC = () => {
     loadFeedback();
   }, []);
 
-  const loadFeedback = () => {
+  const loadFeedback = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setFeedbackList(mockAdmin.getFeedback());
+    try {
+      const data = await adminService.getFeedback();
+      setFeedbackList(data);
+    } finally {
       setIsRefreshing(false);
-    }, 150);
+    }
   };
 
-  const handleStatusChange = (id: string, newStatus: 'new' | 'reviewed' | 'resolved') => {
-    mockAdmin.updateFeedbackStatus(id, newStatus);
-    setFeedbackList(mockAdmin.getFeedback());
+  const handleStatusChange = async (id: string, newStatus: 'new' | 'reviewed' | 'resolved') => {
+    await adminService.updateFeedbackStatus(id, newStatus);
+    await loadFeedback();
     showNotice(`Feedback status updated to [${newStatus.toUpperCase()}]`);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Delete this feedback submission permanently?')) {
-      mockAdmin.deleteFeedback(id);
-      setFeedbackList(mockAdmin.getFeedback());
+  const handleDelete = async (id: string) => {
+    if (confirm('Delete this feedback submission permanently from Supabase?')) {
+      await adminService.deleteFeedback(id);
+      await loadFeedback();
       showNotice('Feedback entry removed from database.');
     }
   };
@@ -93,7 +95,7 @@ export const AdminFeedbackPage: React.FC = () => {
   };
 
   // Stats
-  const stats = mockAdmin.getFeedbackStats();
+  const stats = adminService.getFeedbackStats(feedbackList);
 
   // Filtering
   const filteredList = feedbackList.filter(item => {

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
-import { mockAdmin, type ActivityLog } from '../../services/mockAdmin';
+import { adminService, type ActivityLog } from '../../services/adminService';
 import { Calendar, User, Info, Search, RefreshCw, Trash2, ArrowUpRight, LogIn, Plus } from 'lucide-react';
 
 type FilterTab = 'all' | 'sign_ins' | 'creates' | 'exports' | 'deletes';
 
 export const AdminActivity: React.FC = () => {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -15,13 +16,15 @@ export const AdminActivity: React.FC = () => {
     handleRefresh();
   }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    // Simulated live refresh
-    setTimeout(() => {
-      setLogs(mockAdmin.getActivityLogs());
+    try {
+      const data = await adminService.getActivityLogs(100);
+      setLogs(data);
+    } finally {
       setIsRefreshing(false);
-    }, 200);
+      setIsLoading(false);
+    }
   };
 
   const filteredLogs = logs.filter((log) => {
@@ -106,9 +109,17 @@ export const AdminActivity: React.FC = () => {
 
       {/* Timeline flow */}
       <div className="flex flex-col gap-3.5 select-text">
-        {filteredLogs.length === 0 ? (
-          <Card variant="blueprint" className="py-12 text-center text-ink-soft font-mono text-[13px]">
-            // no activity log records matching current filter constraints
+        {isLoading ? (
+          <Card variant="blueprint" className="py-12 text-center text-ink-soft font-mono text-[13px] flex items-center justify-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-blueprint" />
+            <span>// fetching real-time audit logs from supabase...</span>
+          </Card>
+        ) : filteredLogs.length === 0 ? (
+          <Card variant="blueprint" className="p-8 flex flex-col items-center justify-center gap-2 text-center font-mono text-[13px]">
+            <p className="text-ink font-bold">// No audit log entries recorded yet.</p>
+            <p className="text-[12px] text-ink-soft max-w-md">
+              Audit logs are automatically captured in real time whenever users sign in, create or delete projects/diagrams, or export diagrams.
+            </p>
           </Card>
         ) : (
           filteredLogs.map((log) => {
@@ -117,17 +128,17 @@ export const AdminActivity: React.FC = () => {
             let actionVerb = log.action.replace('_', ' ');
 
             if (log.action === 'signed_in') {
-              badgeStyle = "border-blueprint text-blueprint bg-blueprint bg-opacity-5";
+              badgeStyle = "border-[#1E5C8C] text-[#1E5C8C] dark:text-[#388BFD] bg-[#EBF3FA] dark:bg-[#152332]";
               Icon = LogIn;
               actionVerb = "session login";
             } else if (log.action === 'created_project' || log.action === 'created_diagram') {
               badgeStyle = "border-ink text-ink bg-paper";
               Icon = Plus;
             } else if (log.action === 'exported_diagram') {
-              badgeStyle = "border-signal text-signal bg-signal bg-opacity-5";
+              badgeStyle = "border-[#D45B33] text-[#D45B33] dark:text-[#F78166] bg-[#FDF2EC] dark:bg-[#2C1610]";
               Icon = ArrowUpRight;
-            } else if (log.action === 'deleted_project') {
-              badgeStyle = "border-signal text-paper bg-signal font-bold";
+            } else if (log.action === 'deleted_project' || log.action === 'deleted_diagram') {
+              badgeStyle = "border-rose-600 text-rose-800 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 font-bold";
               Icon = Trash2;
             }
 

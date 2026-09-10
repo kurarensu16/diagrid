@@ -17,8 +17,21 @@ import { ServerError } from './pages/ServerError';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { useCurrentUser, useAuthSession } from './services/mockAuth';
 import { authService } from './services/authService';
+import { themeService } from './services/themeService';
 import { Avatar } from './components/ui/Avatar';
 import { Logo } from './components/ui/Logo';
+
+// Global theme sync handler: Keeps landing and public pages in classic blueprint mode, and applies user theme only to app workspace routes
+const ThemeSyncHandler: React.FC = () => {
+  const user = useCurrentUser();
+  const location = useLocation();
+
+  useEffect(() => {
+    themeService.applyCurrentRouteTheme(user?.theme);
+  }, [user?.theme, location.pathname]);
+
+  return null;
+};
 
 // Global auth redirect handler for incoming email confirmation links
 const AuthRedirectHandler: React.FC = () => {
@@ -96,7 +109,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 import { AdminLayout } from './components/layout/AdminLayout';
 import { AdminOverview } from './pages/admin/AdminOverview';
 import { AdminUsers } from './pages/admin/AdminUsers';
-import { AdminContent } from './pages/admin/AdminContent';
+import { AdminStorage } from './pages/admin/AdminStorage';
 import { AdminFeedbackPage } from './pages/admin/AdminFeedback';
 import { AdminActivity } from './pages/admin/AdminActivity';
 import { AdminSystem } from './pages/admin/AdminSystem';
@@ -209,6 +222,7 @@ function App() {
   return (
     <AppErrorBoundary>
       <BrowserRouter>
+        <ThemeSyncHandler />
         <AuthRedirectHandler />
         <Routes>
           {/* Public Routes */}
@@ -264,7 +278,8 @@ function App() {
           >
             <Route path="/admin" element={<AdminOverview />} />
             <Route path="/admin/users" element={<AdminUsers />} />
-            <Route path="/admin/content" element={<AdminContent />} />
+            <Route path="/admin/storage" element={<AdminStorage />} />
+            <Route path="/admin/content" element={<Navigate to="/admin/storage" replace />} />
             <Route path="/admin/feedback" element={<AdminFeedbackPage />} />
             <Route path="/admin/activity" element={<AdminActivity />} />
             <Route path="/admin/system" element={<AdminSystem />} />

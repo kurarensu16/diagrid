@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
+import { themeService } from './themeService';
 
 export interface AuthUser {
   id: string;
@@ -10,11 +11,23 @@ export interface AuthUser {
   presetAvatar?: string;
   bio?: string;
   theme?: 'blueprint' | 'dark' | 'light';
-  defaultNotation?: 'erd' | 'flowchart' | 'sequence';
+  gridStyle?: 'lines' | 'dots' | 'blank';
+  snapToGrid?: boolean;
+  isSupporter?: boolean;
 }
 
 const ADMIN_EMAIL = 'admin@diagrid.dev';
 const STORAGE_KEY = 'diagrid_auth_user';
+
+const authListeners: Set<(user: AuthUser | null) => void> = new Set();
+
+const notifyAuthListeners = (user: AuthUser | null) => {
+  authListeners.forEach((cb) => {
+    try {
+      cb(user);
+    } catch { }
+  });
+};
 
 const getStoredUser = (): AuthUser | null => {
   if (typeof window === 'undefined') return null;
@@ -28,6 +41,9 @@ const getStoredUser = (): AuthUser | null => {
 
 const setCachedUser = (user: AuthUser | null) => {
   cachedUser = user;
+  if (user?.theme) {
+    themeService.setTheme(user.theme);
+  }
   if (typeof window === 'undefined') return;
   try {
     if (user) {
@@ -35,7 +51,8 @@ const setCachedUser = (user: AuthUser | null) => {
     } else {
       localStorage.removeItem(STORAGE_KEY);
     }
-  } catch {}
+  } catch { }
+  notifyAuthListeners(user);
 };
 
 // In-memory cache for synchronous render operations initialized from storage
@@ -70,6 +87,7 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
       if (error || !profile) {
         profileFetchFailed = true;
         const role: 'user' | 'admin' = isAdminEmail ? 'admin' : 'user';
+        const currentSavedTheme = cachedUser?.theme || themeService.getTheme() || 'blueprint';
         const fallbackUser: AuthUser = {
           id: userId,
           email,
@@ -77,8 +95,9 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
           name: email.split('@')[0],
           avatarType: 'preset',
           presetAvatar: role === 'admin' ? 'shield' : 'terminal',
-          theme: 'blueprint',
-          defaultNotation: 'erd',
+          theme: currentSavedTheme,
+          gridStyle: 'lines',
+          snapToGrid: true,
         };
         setCachedUser(fallbackUser);
         return fallbackUser;
@@ -96,8 +115,10 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
         avatarType: profile.avatar_type || 'preset',
         presetAvatar: resolvedRole === 'admin' && (!profile.preset_avatar || profile.preset_avatar === 'terminal') ? 'shield' : (profile.preset_avatar || 'terminal'),
         bio: profile.bio,
-        theme: profile.theme || 'blueprint',
-        defaultNotation: profile.default_notation || 'erd',
+        theme: profile.theme || cachedUser?.theme || themeService.getTheme() || 'blueprint',
+        gridStyle: profile.grid_style || 'lines',
+        snapToGrid: profile.snap_to_grid ?? true,
+        isSupporter: !!profile.is_supporter,
       };
 
       setCachedUser(resolvedUser);
@@ -105,6 +126,7 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
     } catch {
       profileFetchFailed = true;
       const role: 'user' | 'admin' = isAdminEmail ? 'admin' : 'user';
+      const currentSavedTheme = cachedUser?.theme || themeService.getTheme() || 'blueprint';
       const fallbackUser: AuthUser = {
         id: userId,
         email,
@@ -112,8 +134,9 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
         name: email.split('@')[0],
         avatarType: 'preset',
         presetAvatar: role === 'admin' ? 'shield' : 'terminal',
-        theme: 'blueprint',
-        defaultNotation: 'erd',
+        theme: currentSavedTheme,
+        gridStyle: 'lines',
+        snapToGrid: true,
       };
       setCachedUser(fallbackUser);
       return fallbackUser;
@@ -173,12 +196,22 @@ export const authService = {
       return { user: null, error: error.message };
     }
 
-    if (!data.user) {
-      return { user: null, error: 'Sign in failed' };
-    }
-
     const user = await fetchProfile(data.user.id, data.user.email || email);
     setCachedUser(user);
+
+    // Record audit trail event asynchronously
+    if (user && isSupabaseConfigured()) {
+      Promise.resolve(
+        supabase.from('audit_logs').insert({
+          user_id: user.id,
+          user_email: user.email,
+          action: 'signed_in',
+          target: 'Dashboard session established',
+          created_at: new Date().toISOString()
+        })
+      ).catch(() => {});
+    }
+
     return { user };
   },
 
@@ -255,18 +288,29 @@ export const authService = {
   },
 
   updateProfile: async (updates: Partial<AuthUser>): Promise<{ user: AuthUser | null; error?: string }> => {
-    if (!isSupabaseConfigured() || !cachedUser) {
-      return {
-        user: cachedUser,
-        error: 'Supabase is not configured. Please add credentials to .env file.',
-      };
+    const active = cachedUser || {
+      id: 'usr-default',
+      email: 'user@diagrid.dev',
+      role: 'user',
+    };
+
+    const updated = { ...active, ...updates };
+    setCachedUser(updated);
+
+    if (updates.theme) {
+      themeService.setTheme(updates.theme);
+    }
+
+    if (!isSupabaseConfigured()) {
+      return { user: updated };
     }
 
     const payload: Record<string, any> = {};
     if (updates.name !== undefined) payload.name = updates.name;
     if (updates.bio !== undefined) payload.bio = updates.bio;
     if (updates.theme !== undefined) payload.theme = updates.theme;
-    if (updates.defaultNotation !== undefined) payload.default_notation = updates.defaultNotation;
+    if (updates.gridStyle !== undefined) payload.grid_style = updates.gridStyle;
+    if (updates.snapToGrid !== undefined) payload.snap_to_grid = updates.snapToGrid;
     if (updates.avatarType !== undefined) payload.avatar_type = updates.avatarType;
     if (updates.presetAvatar !== undefined) payload.preset_avatar = updates.presetAvatar;
     if (updates.avatar !== undefined) payload.avatar_url = updates.avatar;
@@ -274,14 +318,13 @@ export const authService = {
     const { error } = await supabase
       .from('profiles')
       .update(payload)
-      .eq('id', cachedUser.id);
+      .eq('id', active.id);
 
     if (error) {
-      return { user: cachedUser, error: error.message };
+      console.warn('[authService] Failed to sync profile to Supabase:', error.message);
+      return { user: updated, error: error.message };
     }
 
-    const updated = { ...cachedUser, ...updates };
-    setCachedUser(updated);
     return { user: updated };
   },
 
@@ -316,9 +359,12 @@ export const authService = {
   },
 
   onAuthStateChange: (callback: (user: AuthUser | null) => void): (() => void) => {
+    authListeners.add(callback);
+
     if (!isSupabaseConfigured()) {
-      callback(null);
-      return () => {};
+      return () => {
+        authListeners.delete(callback);
+      };
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -333,6 +379,7 @@ export const authService = {
     });
 
     return () => {
+      authListeners.delete(callback);
       subscription.unsubscribe();
     };
   },
@@ -341,5 +388,5 @@ export const authService = {
 // Initialize session state on app load
 if (!isInitialized && typeof window !== 'undefined') {
   isInitialized = true;
-  authService.getUser().catch(() => {});
+  authService.getUser().catch(() => { });
 }

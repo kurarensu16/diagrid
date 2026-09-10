@@ -106,7 +106,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-ink bg-opacity-70 flex items-center justify-center p-4 sm:p-6 z-50 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 sm:p-6 z-50 backdrop-blur-sm">
       <div className="w-full max-w-3xl bg-paper border-2 border-ink shadow-hard-blueprint flex flex-col max-h-[90vh] overflow-hidden">
         {/* Modal Header */}
         <div className="h-14 border-b-2 border-ink bg-ink text-paper px-6 flex items-center justify-between font-mono select-none">

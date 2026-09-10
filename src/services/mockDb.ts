@@ -59,7 +59,7 @@ export interface Template {
   content: string; // Serialized JSON string
 }
 
-// Starter seed JSON representations
+// Starter seed JSON representations (Broad, Standard Engineering Blueprints)
 const SEEDS = {
   erd: JSON.stringify({
     nodes: [
@@ -76,14 +76,14 @@ const SEEDS = {
         type: 'table',
         label: 'projects',
         x: 60,
-        y: 240,
+        y: 220,
         fields: ['id uuid pk', 'user_id uuid fk', 'name text']
       },
       {
         id: 'n-diagrams',
         type: 'table',
         label: 'diagrams',
-        x: 380,
+        x: 360,
         y: 40,
         fields: ['id uuid pk', 'project_id uuid fk', 'title text', 'content text']
       }
@@ -123,30 +123,30 @@ const SEEDS = {
       {
         id: 'n-drag',
         type: 'process',
-        label: 'Drag Box to Canvas',
+        label: 'Submit Request',
         x: 180,
-        y: 140
+        y: 130
       },
       {
         id: 'n-decision',
         type: 'decision',
-        label: 'Is Connected?',
+        label: 'Is Valid?',
         x: 205,
-        y: 240
+        y: 230
       },
       {
         id: 'n-success',
         type: 'process',
-        label: 'Render Line Edge',
+        label: 'Process Success',
         x: 80,
-        y: 360
+        y: 350
       },
       {
         id: 'n-end',
         type: 'terminal',
-        label: 'Done',
+        label: 'Complete',
         x: 320,
-        y: 360
+        y: 350
       }
     ],
     edges: [
@@ -184,86 +184,103 @@ const SEEDS = {
   }),
   sequence: JSON.stringify({
     nodes: [
-      { id: 'n-client', type: 'process', label: 'Client User', x: 60, y: 60 },
-      { id: 'n-gateway', type: 'process', label: 'API Gateway', x: 260, y: 60 },
-      { id: 'n-db', type: 'process', label: 'Postgres DB', x: 460, y: 60 },
-      { id: 'act-client-1', type: 'sequence-activation', label: 'Client Req', x: 120, y: 140 },
-      { id: 'act-gateway-1', type: 'sequence-activation', label: 'Gateway Proc', x: 320, y: 160 },
-      { id: 'act-db', type: 'sequence-activation', label: 'DB Query', x: 520, y: 200 },
-      { id: 'act-gateway-2', type: 'sequence-activation', label: 'Gateway Resp', x: 320, y: 280 },
-      { id: 'act-client-2', type: 'sequence-activation', label: 'Client UI', x: 120, y: 300 }
+      { id: 'n-client', type: 'process', label: 'Client App', x: 60, y: 40 },
+      { id: 'n-gateway', type: 'process', label: 'API Gateway', x: 280, y: 40 },
+      { id: 'n-db', type: 'process', label: 'Database Server', x: 500, y: 40 },
+      { id: 'act-client-1', type: 'sequence-activation', label: '', x: 120, y: 120 },
+      { id: 'act-gateway-1', type: 'sequence-activation', label: '', x: 340, y: 140 },
+      { id: 'act-db', type: 'sequence-activation', label: '', x: 560, y: 180 },
+      { id: 'act-gateway-2', type: 'sequence-activation', label: '', x: 340, y: 260 },
+      { id: 'act-client-2', type: 'sequence-activation', label: '', x: 120, y: 290 }
     ],
     edges: [
-      { id: 'e-seq-1', source: 'act-client-1', target: 'act-gateway-1', sourceHandle: 'right', targetHandle: 'left', label: 'GET /projects' },
-      { id: 'e-seq-2', source: 'act-gateway-1', target: 'act-db', sourceHandle: 'right', targetHandle: 'left', label: 'query_records()' },
-      { id: 'e-seq-3', source: 'act-db', target: 'act-gateway-2', sourceHandle: 'left', targetHandle: 'right', label: 'records', style: 'dashed' },
+      { id: 'e-seq-1', source: 'act-client-1', target: 'act-gateway-1', sourceHandle: 'right', targetHandle: 'left', label: 'GET /records' },
+      { id: 'e-seq-2', source: 'act-gateway-1', target: 'act-db', sourceHandle: 'right', targetHandle: 'left', label: 'SELECT * FROM tbl' },
+      { id: 'e-seq-3', source: 'act-db', target: 'act-gateway-2', sourceHandle: 'left', targetHandle: 'right', label: 'result_data', style: 'dashed' },
       { id: 'e-seq-4', source: 'act-gateway-2', target: 'act-client-2', sourceHandle: 'left', targetHandle: 'right', label: '200 OK (JSON)', style: 'dashed' }
     ]
   }),
   class: JSON.stringify({
     nodes: [
-      { id: 'n-c1', type: 'table', label: 'UserAccount', x: 80, y: 50, fields: ['+String username', '+login()'] },
-      { id: 'n-c2', type: 'table', label: 'BillingPlan', x: 340, y: 50, fields: ['+Double amount', '+charge()'] }
+      { id: 'n-c1', type: 'table', label: 'UserController', x: 60, y: 40, fields: ['+String route', '+handleRequest()', '+sendResponse()'] },
+      { id: 'n-c2', type: 'table', label: 'UserService', x: 320, y: 40, fields: ['+User findById()', '+saveUser()', '+validateToken()'] },
+      { id: 'n-c3', type: 'table', label: 'UserEntity', x: 580, y: 40, fields: ['-UUID id', '-String email', '-String role', '+getEmail()'] }
     ],
     edges: [
-      { id: 'e-1', source: 'n-c1', target: 'n-c2', sourceHandle: 'right', targetHandle: 'left', label: 'has_plan' }
+      { id: 'e-1', source: 'n-c1', target: 'n-c2', sourceHandle: 'right', targetHandle: 'left', label: 'delegates' },
+      { id: 'e-2', source: 'n-c2', target: 'n-c3', sourceHandle: 'right', targetHandle: 'left', label: 'manages' }
     ]
   }),
   gantt: JSON.stringify({
     nodes: [
-      { id: 'n-g1', type: 'process', label: 'Sprint 1: Base Setup', x: 100, y: 100 },
-      { id: 'n-g2', type: 'process', label: 'Sprint 2: Direct Direct Canvas', x: 360, y: 180 }
+      { id: 'n-g1', type: 'process', label: 'Phase 1: Specifications & Design', x: 60, y: 60 },
+      { id: 'n-g2', type: 'process', label: 'Phase 2: Core Engineering', x: 260, y: 140 },
+      { id: 'n-g3', type: 'process', label: 'Phase 3: QA & Deployment', x: 460, y: 220 }
     ],
     edges: [
-      { id: 'e-1', source: 'n-g1', target: 'n-g2', sourceHandle: 'right', targetHandle: 'left', label: 'pre-req' }
+      { id: 'e-1', source: 'n-g1', target: 'n-g2', sourceHandle: 'right', targetHandle: 'left', label: 'pre-req' },
+      { id: 'e-2', source: 'n-g2', target: 'n-g3', sourceHandle: 'right', targetHandle: 'left', label: 'hand-off' }
     ]
   }),
   dfd: JSON.stringify({
     nodes: [
-      { id: 'dfd-n1', type: 'dfd-entity', label: 'Client User', x: 40, y: 80 },
-      { id: 'dfd-n2', type: 'dfd-process', label: '1.0 Verify User Login', x: 220, y: 80 },
-      { id: 'dfd-n3', type: 'dfd-store', label: 'Users DB Store', x: 440, y: 80 }
+      { id: 'dfd-n1', type: 'dfd-entity', label: 'Customer', x: 40, y: 70 },
+      { id: 'dfd-n2', type: 'dfd-process', label: '1.0 Process Order', x: 260, y: 50 },
+      { id: 'dfd-n3', type: 'dfd-entity', label: 'Payment Gateway', x: 520, y: 70 },
+      { id: 'dfd-s1', type: 'dfd-store', label: 'Orders Store', x: 260, y: 160 },
+      { id: 'dfd-n4', type: 'dfd-process', label: '2.0 Generate Invoice', x: 260, y: 260 },
+      { id: 'dfd-s2', type: 'dfd-store', label: 'Users Database', x: 40, y: 260 }
     ],
     edges: [
-      { id: 'dfd-e1', source: 'dfd-n1', target: 'dfd-n2', sourceHandle: 'right', targetHandle: 'left', label: 'credentials' },
-      { id: 'dfd-e2', source: 'dfd-n2', target: 'dfd-n3', sourceHandle: 'right', targetHandle: 'left', label: 'verify_query' }
+      { id: 'dfd-e1', source: 'dfd-n1', target: 'dfd-n2', sourceHandle: 'right', targetHandle: 'left', label: 'Order Request' },
+      { id: 'dfd-e2', source: 'dfd-n2', target: 'dfd-s1', sourceHandle: 'bottom', targetHandle: 'top', label: 'Save Record' },
+      { id: 'dfd-e3', source: 'dfd-n2', target: 'dfd-n3', sourceHandle: 'right', targetHandle: 'left', label: 'Payment Request' },
+      { id: 'dfd-e4', source: 'dfd-n3', target: 'dfd-n4', sourceHandle: 'bottom', targetHandle: 'right', label: 'Payment Receipt' },
+      { id: 'dfd-e5', source: 'dfd-s2', target: 'dfd-n4', sourceHandle: 'right', targetHandle: 'left', label: 'User Profile' },
+      { id: 'dfd-e6', source: 'dfd-n4', target: 'dfd-n1', sourceHandle: 'left', targetHandle: 'bottom', label: 'Invoice PDF', style: 'dashed' }
     ]
   }),
   usecase: JSON.stringify({
     nodes: [
-      { id: 'uc-n1', type: 'usecase-actor', label: 'System Admin', x: 40, y: 120 },
-      { id: 'uc-n2', type: 'usecase-boundary', label: 'Diagrid Service Boundary', x: 160, y: 30 },
-      { id: 'uc-n3', type: 'usecase-oval', label: 'Authenticate User', x: 200, y: 60 },
-      { id: 'uc-n4', type: 'usecase-oval', label: 'Audit Access Logs', x: 200, y: 160 }
+      { id: 'uc-n2', type: 'usecase-boundary', label: 'System Platform', x: 160, y: 30 },
+      { id: 'uc-n1', type: 'usecase-actor', label: 'Customer', x: 40, y: 70 },
+      { id: 'uc-admin', type: 'usecase-actor', label: 'Administrator', x: 40, y: 220 },
+      { id: 'uc-n3', type: 'usecase-oval', label: 'Authenticate User', x: 210, y: 60 },
+      { id: 'uc-n4', type: 'usecase-oval', label: 'Place Order', x: 210, y: 140 },
+      { id: 'uc-n5', type: 'usecase-oval', label: 'View Reports', x: 210, y: 220 }
     ],
     edges: [
       { id: 'uc-e1', source: 'uc-n1', target: 'uc-n3', sourceHandle: 'right', targetHandle: 'left' },
-      { id: 'uc-e2', source: 'uc-n1', target: 'uc-n4', sourceHandle: 'right', targetHandle: 'left' }
+      { id: 'uc-e2', source: 'uc-n1', target: 'uc-n4', sourceHandle: 'right', targetHandle: 'left' },
+      { id: 'uc-e3', source: 'uc-admin', target: 'uc-n3', sourceHandle: 'right', targetHandle: 'left' },
+      { id: 'uc-e4', source: 'uc-admin', target: 'uc-n5', sourceHandle: 'right', targetHandle: 'left' }
     ]
   }),
   activity: JSON.stringify({
     nodes: [
-      { id: 'act-start', type: 'activity-start', label: 'Start', x: 224, y: 20 },
-      { id: 'act-validate', type: 'activity-action', label: 'Validate Input', x: 165, y: 80 },
-      { id: 'act-check', type: 'activity-decision', label: 'Is Valid?', x: 195, y: 160 },
-      { id: 'act-error', type: 'activity-action', label: 'Show Error Message', x: 380, y: 160 },
-      { id: 'act-fork', type: 'activity-fork', label: 'Fork', x: 140, y: 280 },
-      { id: 'act-payment', type: 'activity-action', label: 'Process Payment', x: 60, y: 340 },
-      { id: 'act-confirm', type: 'activity-action', label: 'Send Confirmation', x: 280, y: 340 },
-      { id: 'act-join', type: 'activity-fork', label: 'Join', x: 140, y: 420 },
-      { id: 'act-end', type: 'activity-end', label: 'End', x: 222, y: 480 }
+      { id: 'act-start', type: 'activity-start', label: '', x: 214, y: 20 },
+      { id: 'act-receive', type: 'activity-action', label: 'Receive Request', x: 155, y: 70 },
+      { id: 'act-check', type: 'activity-decision', label: 'Is Valid?', x: 185, y: 150 },
+      { id: 'act-error', type: 'activity-action', label: 'Show Error Message', x: 380, y: 174 },
+      { id: 'act-fork', type: 'activity-fork', label: '', x: 130, y: 275 },
+      { id: 'act-process', type: 'activity-action', label: 'Process Payment', x: 60, y: 320 },
+      { id: 'act-audit', type: 'activity-action', label: 'Log Audit Trail', x: 270, y: 320 },
+      { id: 'act-join', type: 'activity-fork', label: '', x: 130, y: 405 },
+      { id: 'act-notify', type: 'activity-action', label: 'Send Confirmation', x: 155, y: 440 },
+      { id: 'act-end', type: 'activity-end', label: '', x: 212, y: 520 }
     ],
     edges: [
-      { id: 'act-e1', source: 'act-start', target: 'act-validate', sourceHandle: 'bottom', targetHandle: 'top' },
-      { id: 'act-e2', source: 'act-validate', target: 'act-check', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e1', source: 'act-start', target: 'act-receive', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e2', source: 'act-receive', target: 'act-check', sourceHandle: 'bottom', targetHandle: 'top' },
       { id: 'act-e3', source: 'act-check', target: 'act-fork', sourceHandle: 'bottom', targetHandle: 'top', label: '[valid]' },
       { id: 'act-e4', source: 'act-check', target: 'act-error', sourceHandle: 'right', targetHandle: 'left', label: '[invalid]' },
-      { id: 'act-e5', source: 'act-error', target: 'act-validate', sourceHandle: 'top', targetHandle: 'right', label: 'retry', style: 'dashed' },
-      { id: 'act-e6', source: 'act-fork', target: 'act-payment', sourceHandle: 'bottom', targetHandle: 'top' },
-      { id: 'act-e7', source: 'act-fork', target: 'act-confirm', sourceHandle: 'bottom', targetHandle: 'top' },
-      { id: 'act-e8', source: 'act-payment', target: 'act-join', sourceHandle: 'bottom', targetHandle: 'top' },
-      { id: 'act-e9', source: 'act-confirm', target: 'act-join', sourceHandle: 'bottom', targetHandle: 'top' },
-      { id: 'act-e10', source: 'act-join', target: 'act-end', sourceHandle: 'bottom', targetHandle: 'top' }
+      { id: 'act-e5', source: 'act-error', target: 'act-receive', sourceHandle: 'top', targetHandle: 'right', label: 'retry', style: 'dashed' },
+      { id: 'act-e6', source: 'act-fork', target: 'act-process', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e7', source: 'act-fork', target: 'act-audit', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e8', source: 'act-process', target: 'act-join', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e9', source: 'act-audit', target: 'act-join', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e10', source: 'act-join', target: 'act-notify', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'act-e11', source: 'act-notify', target: 'act-end', sourceHandle: 'bottom', targetHandle: 'top' }
     ]
   })
 };

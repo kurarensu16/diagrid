@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { authService } from './authService';
 import { mockDb, type Diagram } from './mockDb';
 import { projectService } from './projectService';
+import { adminService } from './adminService';
 
 export const diagramService = {
   /**
@@ -140,6 +141,11 @@ export const diagramService = {
         // ignore mirror fail
       }
 
+      // Record audit trail event asynchronously
+      if (user) {
+        adminService.logActivity('created_diagram', `${title.trim()} (${type.toUpperCase()})`, user.email);
+      }
+
       return {
         id: data.id,
         project_id: data.project_id,
@@ -267,6 +273,11 @@ export const diagramService = {
         .from('diagrams')
         .delete()
         .eq('id', id);
+
+      const user = authService.getUserSync();
+      if (!error && user) {
+        adminService.logActivity('deleted_diagram', `Diagram ${id}`, user.email);
+      }
 
       return !error;
     } catch {

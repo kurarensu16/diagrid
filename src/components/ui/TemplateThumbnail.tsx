@@ -1,14 +1,6 @@
 import React, { useId } from 'react';
 import type { Diagram, CanvasNode, CanvasEdge } from '../../services/mockDb';
-
-export interface FreehandDrawing {
-  id: string;
-  path: string;
-  color?: string;
-  width?: number;
-  opacity?: number;
-  tool?: 'pen' | 'highlighter';
-}
+import { getNodeDimensions, type FreehandDrawing } from '../../utils/diagramExport';
 
 export interface TemplateThumbnailProps {
   content: string;
@@ -40,15 +32,14 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
       );
     }
 
-    // Determine bounding box of all nodes
+    // Determine bounding box of all nodes using exact node dimension calculations
     const nodeCoordsX: number[] = [];
     const nodeCoordsY: number[] = [];
 
     nodes.forEach(n => {
-      const w = n.customWidth || n.width || (n.type === 'table' ? 140 : n.type === 'usecase-boundary' ? 240 : 120);
-      const h = n.customHeight || n.height || (n.type === 'table' ? (n.fields ? 35 + n.fields.length * 16 : 100) : n.type === 'usecase-boundary' ? 180 : 60);
-      nodeCoordsX.push(n.x, n.x + w);
-      nodeCoordsY.push(n.y, n.y + h);
+      const { width, height } = getNodeDimensions(n);
+      nodeCoordsX.push(n.x, n.x + width + 8);
+      nodeCoordsY.push(n.y, n.y + height + 8);
     });
 
     // Fallback coords if only drawings exist
@@ -62,7 +53,7 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
     const minY = Math.min(...nodeCoordsY);
     const maxY = Math.max(...nodeCoordsY);
 
-    const padding = 32;
+    const padding = 28;
     const boxWidth = Math.max(maxX - minX + padding * 2, 280);
     const boxHeight = Math.max(maxY - minY + padding * 2, 180);
     const viewBox = `${minX - padding} ${minY - padding} ${boxWidth} ${boxHeight}`;
@@ -78,23 +69,42 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
         >
           <defs>
             <marker id={`arrow-${uid}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#15191C" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#15191C" />
             </marker>
             <marker id={`arrow-blue-${uid}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#1E5C8C" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#1E5C8C" />
             </marker>
             <marker id={`crows-one-${uid}`} viewBox="0 0 16 16" refX="16" refY="8" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
               <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-              <line x1="7" y1="2" x2="7" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
               <line x1="12" y1="2" x2="12" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
             </marker>
             <marker id={`crows-many-${uid}`} viewBox="0 0 16 16" refX="16" refY="8" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
               <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-              <line x1="4" y1="2" x2="4" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
               <line x1="5" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
               <line x1="5" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
             </marker>
           </defs>
+
+          {/* Render Sequence Diagram Lifelines (Vertical dashed lines beneath participants) */}
+          {nodes.filter(n => n.type === 'process' && nodes.some(m => m.type === 'sequence-activation')).map(pNode => {
+            const { width } = getNodeDimensions(pNode);
+            const lineX = pNode.x + width / 2;
+            const startY = pNode.y + 40;
+            const endY = maxY - 10;
+            return (
+              <line
+                key={`lifeline-${pNode.id}`}
+                x1={lineX}
+                y1={startY}
+                x2={lineX}
+                y2={endY}
+                stroke="#15191C"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+                opacity="0.4"
+              />
+            );
+          })}
 
           {/* Render edges */}
           {edges.map((edge) => {
@@ -102,16 +112,34 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
             const tgt = nodeMap.get(edge.target);
             if (!src || !tgt) return null;
 
-            const srcW = src.customWidth || src.width || (src.type === 'table' ? 130 : 90);
-            const srcH = src.customHeight || src.height || (src.type === 'table' ? 70 : 40);
-            const tgtW = tgt.customWidth || tgt.width || (tgt.type === 'table' ? 130 : 90);
-            const tgtH = tgt.customHeight || tgt.height || (tgt.type === 'table' ? 70 : 40);
+            const srcDim = getNodeDimensions(src);
+            const tgtDim = getNodeDimensions(tgt);
 
-            const startX = src.x + srcW / 2;
-            const startY = src.y + srcH / 2;
-            const endX = tgt.x + tgtW / 2;
-            const endY = tgt.y + tgtH / 2;
+            // Handle coordinates based on handle ports
+            let startX = src.x + srcDim.width / 2;
+            let startY = src.y + srcDim.height;
+            if (edge.sourceHandle === 'top') { startX = src.x + srcDim.width / 2; startY = src.y; }
+            else if (edge.sourceHandle === 'bottom') { startX = src.x + srcDim.width / 2; startY = src.y + srcDim.height; }
+            else if (edge.sourceHandle === 'left') { startX = src.x; startY = src.y + srcDim.height / 2; }
+            else if (edge.sourceHandle === 'right') { startX = src.x + srcDim.width; startY = src.y + srcDim.height / 2; }
+
+            let endX = tgt.x + tgtDim.width / 2;
+            let endY = tgt.y;
+            if (edge.targetHandle === 'top') { endX = tgt.x + tgtDim.width / 2; endY = tgt.y; }
+            else if (edge.targetHandle === 'bottom') { endX = tgt.x + tgtDim.width / 2; endY = tgt.y + tgtDim.height; }
+            else if (edge.targetHandle === 'left') { endX = tgt.x; endY = tgt.y + tgtDim.height / 2; }
+            else if (edge.targetHandle === 'right') { endX = tgt.x + tgtDim.width; endY = tgt.y + tgtDim.height / 2; }
+
             const midX = (startX + endX) / 2;
+            const midY = (startY + endY) / 2;
+
+            // Orthogonal path
+            let pathData = '';
+            if (edge.sourceHandle === 'left' || edge.sourceHandle === 'right' || edge.targetHandle === 'left' || edge.targetHandle === 'right') {
+              pathData = `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+            } else {
+              pathData = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+            }
 
             const markerStart = edge.sourceMarker 
               ? (edge.sourceMarker === 'none' ? undefined : `url(#crows-${edge.sourceMarker}-${uid})`)
@@ -123,7 +151,7 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
             return (
               <g key={edge.id}>
                 <path
-                  d={`M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`}
+                  d={pathData}
                   fill="none"
                   stroke={edge.style === 'dashed' ? '#4A5359' : '#15191C'}
                   strokeWidth="1.75"
@@ -132,16 +160,29 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
                   markerEnd={markerEnd}
                 />
                 {edge.label && (
-                  <text
-                    x={midX + 4}
-                    y={(startY + endY) / 2}
-                    fill="#15191C"
-                    fontSize="8.5"
-                    fontFamily="monospace"
-                    fontWeight="bold"
-                  >
-                    {edge.label}
-                  </text>
+                  <g>
+                    <rect
+                      x={midX - (edge.label.length * 3 + 6)}
+                      y={midY - 7}
+                      width={edge.label.length * 6 + 12}
+                      height="14"
+                      fill="#FFFFFF"
+                      stroke="#15191C"
+                      strokeWidth="1"
+                      rx="2"
+                    />
+                    <text
+                      x={midX}
+                      y={midY + 3.5}
+                      fill="#15191C"
+                      fontSize="8"
+                      fontFamily="monospace"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                    >
+                      {edge.label}
+                    </text>
+                  </g>
                 )}
               </g>
             );
@@ -163,14 +204,17 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
 
           {/* Render nodes */}
           {nodes.map((node) => {
+            const { width, height } = getNodeDimensions(node);
             const fill = node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : '#FFFFFF';
             const strokeWidth = node.borderWidth || 1.75;
             const strokeDash = node.borderStyle === 'dashed' ? '5 3' : node.borderStyle === 'dotted' ? '2 2' : undefined;
 
+            // 1. Table / ERD / Class
             if (node.type === 'table') {
               const fields = node.fields || [];
-              const width = node.customWidth || node.width || 130;
-              const height = node.customHeight || node.height || (28 + fields.length * 15);
+              const headerBg = (node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#'))
+                ? node.shadowAccent
+                : '#1E5C8C';
 
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
@@ -185,12 +229,12 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
                     strokeWidth={strokeWidth}
                     strokeDasharray={strokeDash}
                   />
-                  <rect x="0" y="0" width={width} height="22" fill="#1E5C8C" stroke="#15191C" strokeWidth={strokeWidth} />
-                  <text x="6" y="15" fill="#FFFFFF" fontSize="9.5" fontFamily="monospace" fontWeight="bold">
+                  <rect x="0" y="0" width={width} height="22" fill={headerBg} stroke="#15191C" strokeWidth={strokeWidth} />
+                  <text x={width / 2} y="15" fill="#FFFFFF" fontSize="9" fontFamily="monospace" fontWeight="bold" textAnchor="middle">
                     {node.label}
                   </text>
                   {fields.map((f, i) => (
-                    <text key={i} x="6" y={35 + i * 14} fill="#2C3439" fontSize="8" fontFamily="monospace">
+                    <text key={i} x="6" y={36 + i * 15} fill="#2C3439" fontSize="8" fontFamily="monospace">
                       {f}
                     </text>
                   ))}
@@ -198,41 +242,72 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
               );
             }
 
+            // 2. Decision / Activity Decision (Diamond)
             if (node.type === 'decision' || node.type === 'activity-decision') {
-              const dSize = node.customWidth || 64;
+              const dW = width;
+              const dH = height;
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
                   <polygon
-                    points={`${dSize / 2 + 2},2 ${dSize + 2},${dSize / 2 + 2} ${dSize / 2 + 2},${dSize + 2} 2,${dSize / 2 + 2}`}
+                    points={`${dW / 2 + 2},2 ${dW + 2},${dH / 2 + 2} ${dW / 2 + 2},${dH + 2} 2,${dH / 2 + 2}`}
                     fill="#D45B33"
                     opacity="0.25"
                   />
                   <polygon
-                    points={`${dSize / 2},0 ${dSize},${dSize / 2} ${dSize / 2},${dSize} 0,${dSize / 2}`}
+                    points={`${dW / 2},0 ${dW},${dH / 2} ${dW / 2},${dH} 0,${dH / 2}`}
                     fill={fill}
                     stroke="#15191C"
                     strokeWidth={strokeWidth}
                     strokeDasharray={strokeDash}
                   />
-                  <text x={dSize / 2} y={dSize / 2 + 3} textAnchor="middle" fill="#D45B33" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
+                  <text x={dW / 2} y={dH / 2 + 3.5} textAnchor="middle" fill="#D45B33" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
                     {node.label}
                   </text>
                 </g>
               );
             }
 
-            if (node.type === 'terminal' || node.type === 'activity-start' || node.type === 'activity-end') {
-              const width = node.customWidth || node.width || 90;
-              const height = node.customHeight || node.height || 28;
+            // 3. Activity Initial Node (Solid Black Circle ●)
+            if (node.type === 'activity-start') {
+              const r = width / 2;
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                  <rect x="2" y="2" width={width} height={height} rx={height / 2} fill="#15191C" opacity="0.2" />
+                  <circle cx={r} cy={r} r={r - 2} fill="#15191C" />
+                </g>
+              );
+            }
+
+            // 4. Activity Final Node (Bullseye Circle ◉)
+            if (node.type === 'activity-end') {
+              const r = width / 2;
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <circle cx={r} cy={r} r={r - 2} fill="#FFFFFF" stroke="#15191C" strokeWidth="2" />
+                  <circle cx={r} cy={r} r={r - 6} fill="#15191C" />
+                </g>
+              );
+            }
+
+            // 5. Activity Fork / Join Synchronization Bar (━━━)
+            if (node.type === 'activity-fork') {
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <rect x="0" y="0" width={width} height={height} fill="#15191C" rx="1" />
+                </g>
+              );
+            }
+
+            // 6. Activity Action State (Rounded Pill)
+            if (node.type === 'activity-action') {
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <rect x="3" y="3" width={width} height={height} rx="12" fill="#15191C" opacity="0.2" />
                   <rect 
                     x="0" 
                     y="0" 
                     width={width} 
                     height={height} 
-                    rx={height / 2} 
+                    rx="12" 
                     fill={fill} 
                     stroke="#15191C" 
                     strokeWidth={strokeWidth}
@@ -245,24 +320,101 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
               );
             }
 
-            if (node.type === 'usecase-actor') {
+            // 7. Sequence Activation Bar (Thin vertical strip)
+            if (node.type === 'sequence-activation') {
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                  <circle cx="20" cy="10" r="7" fill={fill} stroke="#15191C" strokeWidth={strokeWidth} />
-                  <line x1="20" y1="17" x2="20" y2="35" stroke="#15191C" strokeWidth={strokeWidth} />
-                  <line x1="10" y1="23" x2="30" y2="23" stroke="#15191C" strokeWidth={strokeWidth} />
-                  <line x1="20" y1="35" x2="12" y2="48" stroke="#15191C" strokeWidth={strokeWidth} />
-                  <line x1="20" y1="35" x2="28" y2="48" stroke="#15191C" strokeWidth={strokeWidth} />
-                  <text x="20" y="60" textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
+                  <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
+                </g>
+              );
+            }
+
+            // 8. DFD External Entity (Double-bordered box)
+            if (node.type === 'dfd-entity') {
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <rect x="3" y="3" width={width} height={height} fill="#15191C" opacity="0.2" />
+                  <rect 
+                    x="0" 
+                    y="0" 
+                    width={width} 
+                    height={height} 
+                    fill={fill} 
+                    stroke="#15191C" 
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={strokeDash}
+                  />
+                  <rect x="3" y="3" width={width - 6} height={height - 6} fill="none" stroke="#15191C" strokeWidth="1" />
+                  <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
                     {node.label}
                   </text>
                 </g>
               );
             }
 
+            // 9. DFD Process (Gane-Sarson with Top ID Header)
+            if (node.type === 'dfd-process') {
+              const splitIdx = node.label.indexOf(' ');
+              const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
+              const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <rect x="3" y="3" width={width} height={height} rx="6" fill="#15191C" opacity="0.2" />
+                  <rect 
+                    x="0" 
+                    y="0" 
+                    width={width} 
+                    height={height} 
+                    rx="6" 
+                    fill={fill} 
+                    stroke="#15191C" 
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={strokeDash}
+                  />
+                  <line x1="0" y1="18" x2={width} y2="18" stroke="#15191C" strokeWidth="1.2" />
+                  <text x={width / 2} y="13" textAnchor="middle" fill="#5A666E" fontSize="7.5" fontFamily="monospace" fontWeight="bold">
+                    {processId}
+                  </text>
+                  <text x={width / 2} y={height / 2 + 10} textAnchor="middle" fill="#15191C" fontSize="8" fontFamily="monospace" fontWeight="bold">
+                    {processName}
+                  </text>
+                </g>
+              );
+            }
+
+            // 10. DFD Data Store (Open-ended parallel lines)
+            if (node.type === 'dfd-store') {
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <rect x="0" y="0" width={width} height={height} fill="#F1F4F1" />
+                  <line x1="0" y1="0" x2={width} y2="0" stroke="#15191C" strokeWidth="2" />
+                  <line x1="0" y1={height} x2={width} y2={height} stroke="#15191C" strokeWidth="2" />
+                  <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
+                    [D] {node.label}
+                  </text>
+                </g>
+              );
+            }
+
+            // 11. Use Case Actor (Stick Figure)
+            if (node.type === 'usecase-actor') {
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  <circle cx="35" cy="14" r="8" fill={fill} stroke="#15191C" strokeWidth={strokeWidth} />
+                  <line x1="35" y1="22" x2="35" y2="46" stroke="#15191C" strokeWidth={strokeWidth} />
+                  <line x1="18" y1="30" x2="52" y2="30" stroke="#15191C" strokeWidth={strokeWidth} />
+                  <line x1="35" y1="46" x2="22" y2="68" stroke="#15191C" strokeWidth={strokeWidth} />
+                  <line x1="35" y1="46" x2="48" y2="68" stroke="#15191C" strokeWidth={strokeWidth} />
+                  <text x="35" y="82" textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
+                    {node.label}
+                  </text>
+                </g>
+              );
+            }
+
+            // 12. Use Case Boundary
             if (node.type === 'usecase-boundary') {
-              const width = node.customWidth || 220;
-              const height = node.customHeight || 170;
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
                   <rect 
@@ -276,15 +428,16 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
                     strokeDasharray="4 4" 
                   />
                   <text x="10" y="16" fill="#1E5C8C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
-                    [Boundary] {node.label}
+                    [System] {node.label}
                   </text>
                 </g>
               );
             }
 
+            // 13. Use Case Oval
             if (node.type === 'usecase-oval') {
-              const rx = (node.customWidth || 120) / 2;
-              const ry = (node.customHeight || 36) / 2;
+              const rx = width / 2;
+              const ry = height / 2;
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
                   <ellipse 
@@ -294,7 +447,7 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
                     ry={ry} 
                     fill={fill} 
                     stroke="#15191C" 
-                    strokeWidth={strokeWidth}
+                    strokeWidth={strokeWidth} 
                     strokeDasharray={strokeDash}
                   />
                   <text x={rx} y={ry + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
@@ -304,24 +457,30 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
               );
             }
 
-            if (node.type === 'dfd-store') {
-              const width = node.customWidth || 110;
-              const height = node.customHeight || 36;
+            // 14. Terminal (Pill / Oval)
+            if (node.type === 'terminal') {
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                  <line x1="0" y1="0" x2={width} y2="0" stroke="#15191C" strokeWidth="2" />
-                  <line x1="0" y1={height} x2={width} y2={height} stroke="#15191C" strokeWidth="2" />
-                  <rect x="0" y="0" width={width} height={height} fill="#F1F4F1" />
+                  <rect x="2" y="2" width={width} height={height} rx={height / 2} fill="#15191C" opacity="0.2" />
+                  <rect 
+                    x="0" 
+                    y="0" 
+                    width={width} 
+                    height={height} 
+                    rx={height / 2} 
+                    fill={fill} 
+                    stroke="#15191C" 
+                    strokeWidth={strokeWidth} 
+                    strokeDasharray={strokeDash}
+                  />
                   <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
-                    [D] {node.label}
+                    {node.label}
                   </text>
                 </g>
               );
             }
 
-            // Default Process Card
-            const width = node.customWidth || node.width || 105;
-            const height = node.customHeight || node.height || 38;
+            // 15. Default Process Card
             return (
               <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
                 <rect x="3" y="3" width={width} height={height} fill="#15191C" opacity="0.2" />
@@ -332,7 +491,7 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
                   height={height} 
                   fill={fill} 
                   stroke="#15191C" 
-                  strokeWidth={strokeWidth}
+                  strokeWidth={strokeWidth} 
                   strokeDasharray={strokeDash}
                 />
                 <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">

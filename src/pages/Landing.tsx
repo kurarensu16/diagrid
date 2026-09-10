@@ -33,6 +33,7 @@ interface DemoField {
   name: string;
   type: string;
   isKey?: boolean;
+  isFk?: boolean;
 }
 
 interface DemoNode {
@@ -40,10 +41,11 @@ interface DemoNode {
   label: string;
   x: number;
   y: number;
-  type: 'table' | 'process' | 'decision' | 'terminal' | 'actor';
+  type: 'table' | 'process' | 'decision' | 'terminal' | 'actor' | 'activation';
   color: 'blueprint' | 'signal' | 'ink';
   fields?: DemoField[];
   subtitle?: string;
+  badge?: string;
 }
 
 const ERD_NODES: DemoNode[] = [
@@ -64,41 +66,42 @@ const ERD_NODES: DemoNode[] = [
     id: 'erd-orders', 
     label: 'orders', 
     x: 16, 
-    y: 175, 
+    y: 165, 
     type: 'table', 
     color: 'blueprint',
     fields: [
       { name: 'id', type: 'uuid', isKey: true },
-      { name: 'user_id', type: 'uuid' },
+      { name: 'user_id', type: 'uuid', isFk: true },
       { name: 'total_usd', type: 'numeric' }
     ]
   },
   { 
     id: 'erd-diagrams', 
     label: 'diagrams', 
-    x: 218, 
-    y: 40, 
+    x: 230, 
+    y: 35, 
     type: 'table', 
-    color: 'ink',
+    color: 'blueprint',
     fields: [
       { name: 'id', type: 'uuid', isKey: true },
-      { name: 'title', type: 'varchar' },
-      { name: 'schema_type', type: 'enum' }
+      { name: 'order_id', type: 'uuid', isFk: true },
+      { name: 'title', type: 'varchar' }
     ]
   },
 ];
 
 const FLOW_NODES: DemoNode[] = [
-  { id: 'flow-start', label: 'START_CHECKOUT', x: 20, y: 20, type: 'terminal', color: 'ink' },
-  { id: 'flow-process', label: 'Validate Token', x: 18, y: 95, type: 'process', color: 'blueprint', subtitle: 'auth_service.verify()' },
-  { id: 'flow-decision', label: 'Funds OK?', x: 215, y: 75, type: 'decision', color: 'signal' },
-  { id: 'flow-end', label: 'CONFIRM_ORDER', x: 200, y: 195, type: 'terminal', color: 'blueprint' },
+  { id: 'flow-start', label: 'Start Flow', x: 20, y: 20, type: 'terminal', color: 'ink' },
+  { id: 'flow-process', label: 'Validate Card Details', x: 16, y: 88, type: 'process', color: 'blueprint', subtitle: 'auth_service.verify()' },
+  { id: 'flow-decision', label: 'Funds OK?', x: 225, y: 78, type: 'decision', color: 'signal' },
+  { id: 'flow-end', label: 'Confirm & Receipt', x: 210, y: 195, type: 'terminal', color: 'blueprint' },
+  { id: 'flow-decline', label: 'Decline Notice', x: 20, y: 195, type: 'process', color: 'signal', subtitle: 'Retry payment' },
 ];
 
 const SEQUENCE_NODES: DemoNode[] = [
-  { id: 'seq-client', label: 'Client User', x: 16, y: 16, type: 'actor', color: 'ink', subtitle: 'Web Frontend' },
+  { id: 'seq-client', label: 'Client App', x: 16, y: 16, type: 'actor', color: 'ink', subtitle: 'Frontend' },
   { id: 'seq-gateway', label: 'API Gateway', x: 140, y: 16, type: 'actor', color: 'blueprint', subtitle: 'Edge Router' },
-  { id: 'seq-db', label: 'Postgres DB', x: 260, y: 16, type: 'actor', color: 'signal', subtitle: 'Main Cluster' },
+  { id: 'seq-db', label: 'User Database', x: 265, y: 16, type: 'actor', color: 'signal', subtitle: 'PostgreSQL' },
 ];
 
 // Presets for the Code & Notes to Diagram compiler
@@ -118,6 +121,40 @@ Table orders {
   user_id uuid [ref: > users.id]
   total_usd numeric
 }`,
+    diagram: JSON.stringify({
+      nodes: [
+        {
+          id: 't-users',
+          type: 'table',
+          label: 'users',
+          x: 40,
+          y: 40,
+          fields: ['id uuid pk', 'email varchar', 'role text'],
+          shadowAccent: '#1E5C8C'
+        },
+        {
+          id: 't-orders',
+          type: 'table',
+          label: 'orders',
+          x: 270,
+          y: 40,
+          fields: ['id uuid pk', 'user_id uuid fk', 'total_usd numeric'],
+          shadowAccent: '#1E5C8C'
+        }
+      ],
+      edges: [
+        {
+          id: 'e-users-orders',
+          source: 't-users',
+          target: 't-orders',
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          label: '1:N',
+          sourceMarker: 'one',
+          targetMarker: 'many'
+        }
+      ]
+    }),
   },
   flowchart: {
     title: 'Payment Checkout Flow',
@@ -125,10 +162,25 @@ Table orders {
     tabName: 'checkout_flow.chart',
     code: `flowchart TD
   Start([Start Checkout])
-  -> Validate[Validate Card]
-  -> Balance{Sufficient Funds?}
-  Balance -- Yes --> Success([Charge & Receipt])
+  -> Validate[Validate Card Details]
+  -> Balance{Funds OK?}
+  Balance -- Yes --> Success([Confirm & Receipt])
   Balance -- No --> Alert[Decline Notice]`,
+    diagram: JSON.stringify({
+      nodes: [
+        { id: 'n-start', type: 'terminal', label: 'Start Checkout', x: 175, y: 25 },
+        { id: 'n-val', type: 'process', label: 'Validate Card Details', x: 140, y: 95 },
+        { id: 'n-dec', type: 'decision', label: 'Funds OK?', x: 175, y: 175 },
+        { id: 'n-decline', type: 'process', label: 'Decline Notice', x: 35, y: 270, shadowAccent: '#D45B33' },
+        { id: 'n-success', type: 'terminal', label: 'Confirm & Receipt', x: 295, y: 275, shadowAccent: '#10B981' }
+      ],
+      edges: [
+        { id: 'e-1', source: 'n-start', target: 'n-val', sourceHandle: 'bottom', targetHandle: 'top' },
+        { id: 'e-2', source: 'n-val', target: 'n-dec', sourceHandle: 'bottom', targetHandle: 'top' },
+        { id: 'e-3', source: 'n-dec', target: 'n-decline', sourceHandle: 'left', targetHandle: 'top', label: 'No' },
+        { id: 'e-4', source: 'n-dec', target: 'n-success', sourceHandle: 'right', targetHandle: 'top', label: 'Yes' }
+      ]
+    }),
   },
   sequence: {
     title: 'Login Authentication Steps',
@@ -140,9 +192,27 @@ Table orders {
   database DB as User Database
 
   User ->> API: 1. POST /login (credentials)
-  API ->> DB: 2. verify_user_record()
+  API ->> DB: 2. verify_user()
   DB -->> API: 3. auth_verified (hash ok)
   API -->> User: 4. 200 OK (access_token)`,
+    diagram: JSON.stringify({
+      nodes: [
+        { id: 'p-client', type: 'process', label: 'Client App', x: 40, y: 20 },
+        { id: 'p-gateway', type: 'process', label: 'API Gateway', x: 260, y: 20, shadowAccent: '#1E5C8C' },
+        { id: 'p-db', type: 'process', label: 'User Database', x: 480, y: 20 },
+        { id: 'act-1', type: 'sequence-activation', label: '', x: 105, y: 85 },
+        { id: 'act-2', type: 'sequence-activation', label: '', x: 325, y: 100 },
+        { id: 'act-3', type: 'sequence-activation', label: '', x: 545, y: 140 },
+        { id: 'act-4', type: 'sequence-activation', label: '', x: 325, y: 200 },
+        { id: 'act-5', type: 'sequence-activation', label: '', x: 105, y: 240 }
+      ],
+      edges: [
+        { id: 'es-1', source: 'act-1', target: 'act-2', sourceHandle: 'right', targetHandle: 'left', label: '1. POST /login' },
+        { id: 'es-2', source: 'act-2', target: 'act-3', sourceHandle: 'right', targetHandle: 'left', label: '2. verify_user()' },
+        { id: 'es-3', source: 'act-3', target: 'act-4', sourceHandle: 'left', targetHandle: 'right', label: '3. auth_verified (ok)', style: 'dashed' },
+        { id: 'es-4', source: 'act-4', target: 'act-5', sourceHandle: 'left', targetHandle: 'right', label: '4. 200 OK (jwt)', style: 'dashed' }
+      ]
+    }),
   },
 };
 
@@ -358,7 +428,7 @@ export const Landing: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-2 flex-1 border-b-2 border-ink bg-paper">
         {/* Left text column */}
         <div className="p-8 sm:p-12 lg:p-20 border-b-2 lg:border-b-0 lg:border-r-2 border-ink flex flex-col justify-center bg-paper">
-          <div className="font-mono text-[11.5px] text-blueprint tracking-wider mb-4 inline-flex items-center gap-2 bg-blueprint bg-opacity-10 border border-blueprint px-3 py-1 self-start font-bold">
+          <div className="font-mono text-[11.5px] text-blueprint tracking-wider mb-4 inline-flex items-center gap-2 bg-[#EBF3FA] dark:bg-[#152332] border border-blueprint px-3 py-1 self-start font-bold">
             <span className="w-2 h-2 bg-blueprint inline-block animate-pulse"></span>
             <span>Easy Drag-and-Drop Diagramming</span>
           </div>
@@ -503,21 +573,22 @@ export const Landing: React.FC = () => {
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrow-demo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 1 L 10 5 L 0 9 z" fill="#15191C" />
+                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#15191C" />
                     </marker>
                     <marker id="arrow-blue-demo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 1 L 10 5 L 0 9 z" fill="#1E5C8C" />
+                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#1E5C8C" />
                     </marker>
-                    <marker id="crows-one-demo" viewBox="0 0 16 16" refX="16" refY="8" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
-                      <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.75" />
-                      <line x1="7" y1="2" x2="7" y2="14" stroke="#15191C" strokeWidth="1.75" strokeLinecap="round" />
-                      <line x1="12" y1="2" x2="12" y2="14" stroke="#15191C" strokeWidth="1.75" strokeLinecap="round" />
+                    <marker id="arrow-green-demo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#059669" />
                     </marker>
-                    <marker id="crows-many-demo" viewBox="0 0 16 16" refX="16" refY="8" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
-                      <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.75" />
-                      <line x1="4" y1="2" x2="4" y2="14" stroke="#15191C" strokeWidth="1.75" strokeLinecap="round" />
-                      <line x1="5" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.75" strokeLinecap="round" />
-                      <line x1="5" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.75" strokeLinecap="round" />
+                    <marker id="crows-one-demo" viewBox="0 0 16 16" refX="16" refY="8" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
+                      <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
+                      <line x1="12" y1="2" x2="12" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                    </marker>
+                    <marker id="crows-many-demo" viewBox="0 0 16 16" refX="16" refY="8" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
+                      <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
+                      <line x1="5" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                      <line x1="5" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
                     </marker>
                   </defs>
 
@@ -530,34 +601,47 @@ export const Landing: React.FC = () => {
 
                     // u to o (vertical orthogonal)
                     const uX = u.x + 85;
-                    const uY = u.y + 88;
+                    const uY = u.y + 82;
                     const oX = o.x + 85;
                     const oY = o.y;
+                    const midUO_Y = (uY + oY) / 2;
 
                     // o to d (orthogonal turn)
-                    const oRightX = o.x + 175;
-                    const oMidY = o.y + 44;
+                    const oRightX = o.x + 170;
+                    const oMidY = o.y + 41;
                     const dLeftX = d.x;
-                    const dMidY = d.y + 44;
-                    const midX = (oRightX + dLeftX) / 2;
+                    const dMidY = d.y + 41;
+                    const midOD_X = (oRightX + dLeftX) / 2;
 
                     return (
                       <>
                         <path 
-                          d={`M ${uX} ${uY} L ${uX} ${(uY + oY) / 2} L ${oX} ${(uY + oY) / 2} L ${oX} ${oY}`} 
+                          d={`M ${uX} ${uY} L ${uX} ${midUO_Y} L ${oX} ${midUO_Y} L ${oX} ${oY}`} 
                           fill="none" 
-                          stroke="#1E5C8C" 
-                          strokeWidth="2" 
+                          stroke="#15191C" 
+                          strokeWidth="1.75" 
                           markerStart="url(#crows-one-demo)"
                           markerEnd="url(#crows-many-demo)"
                         />
+                        {/* 1:N Label chip */}
+                        <g>
+                          <rect x={uX - 12} y={midUO_Y - 7} width="24" height="14" fill="#FFFFFF" stroke="#15191C" strokeWidth="1" rx="2" />
+                          <text x={uX} y={midUO_Y + 3.5} fill="#15191C" fontSize="8" fontFamily="monospace" fontWeight="bold" textAnchor="middle">1:N</text>
+                        </g>
+
                         <path 
-                          d={`M ${oRightX} ${oMidY} L ${midX} ${oMidY} L ${midX} ${dMidY} L ${dLeftX} ${dMidY}`} 
+                          d={`M ${oRightX} ${oMidY} L ${midOD_X} ${oMidY} L ${midOD_X} ${dMidY} L ${dLeftX} ${dMidY}`} 
                           fill="none" 
                           stroke="#15191C" 
-                          strokeWidth="2" 
-                          markerEnd="url(#crows-one-demo)"
+                          strokeWidth="1.75" 
+                          markerStart="url(#crows-one-demo)"
+                          markerEnd="url(#crows-many-demo)"
                         />
+                        {/* 1:N Label chip */}
+                        <g>
+                          <rect x={midOD_X - 12} y={((oMidY + dMidY) / 2) - 7} width="24" height="14" fill="#FFFFFF" stroke="#15191C" strokeWidth="1" rx="2" />
+                          <text x={midOD_X} y={((oMidY + dMidY) / 2) + 3.5} fill="#15191C" fontSize="8" fontFamily="monospace" fontWeight="bold" textAnchor="middle">1:N</text>
+                        </g>
                       </>
                     );
                   })()}
@@ -567,32 +651,82 @@ export const Landing: React.FC = () => {
                     const start = demoNodes.find(n => n.id === 'flow-start');
                     const proc = demoNodes.find(n => n.id === 'flow-process');
                     const dec = demoNodes.find(n => n.id === 'flow-decision');
-                    const end = demoNodes.find(n => n.id === 'flow-end');
-                    if (!start || !proc || !dec || !end) return null;
+                    const succ = demoNodes.find(n => n.id === 'flow-end');
+                    const decAlert = demoNodes.find(n => n.id === 'flow-decline');
+                    if (!start || !proc || !dec || !succ) return null;
+
+                    // Start to Process
+                    const startX = start.x + 65;
+                    const startY = start.y + 30;
+                    const procTopX = proc.x + 75;
+                    const procTopY = proc.y;
+
+                    // Process to Decision
+                    const procRightX = proc.x + 150;
+                    const procRightY = proc.y + 22;
+                    const decLeftX = dec.x;
+                    const decLeftY = dec.y + 30;
+                    const midProcDec = (procRightX + decLeftX) / 2;
+
+                    // Decision to Success (Yes - Bottom)
+                    const decBottomX = dec.x + 30;
+                    const decBottomY = dec.y + 60;
+                    const succTopX = succ.x + 65;
+                    const succTopY = succ.y;
+
+                    // Decision to Decline (No - Left to bottom)
+                    const decDeclineX = decAlert ? decAlert.x + 75 : 0;
+                    const decDeclineY = decAlert ? decAlert.y : 0;
 
                     return (
                       <>
+                        {/* Start to Validate */}
                         <path 
-                          d={`M ${start.x + 70} ${start.y + 32} L ${proc.x + 70} ${proc.y}`} 
+                          d={`M ${startX} ${startY} L ${startX} ${(startY + procTopY) / 2} L ${procTopX} ${(startY + procTopY) / 2} L ${procTopX} ${procTopY}`} 
                           fill="none" 
                           stroke="#15191C" 
-                          strokeWidth="2" 
+                          strokeWidth="1.75" 
                           markerEnd="url(#arrow-demo)"
                         />
+
+                        {/* Validate to Decision */}
                         <path 
-                          d={`M ${proc.x + 140} ${proc.y + 24} L ${dec.x} ${proc.y + 24} L ${dec.x} ${dec.y + 30}`} 
+                          d={`M ${procRightX} ${procRightY} L ${midProcDec} ${procRightY} L ${midProcDec} ${decLeftY} L ${decLeftX} ${decLeftY}`} 
                           fill="none" 
-                          stroke="#1E5C8C" 
-                          strokeWidth="2" 
-                          markerEnd="url(#arrow-blue-demo)"
-                        />
-                        <path 
-                          d={`M ${dec.x + 30} ${dec.y + 60} L ${dec.x + 30} ${end.y + 16} L ${end.x} ${end.y + 16}`} 
-                          fill="none" 
-                          stroke="#D45B33" 
-                          strokeWidth="2" 
+                          stroke="#15191C" 
+                          strokeWidth="1.75" 
                           markerEnd="url(#arrow-demo)"
                         />
+
+                        {/* Decision to Success (Yes) */}
+                        <path 
+                          d={`M ${decBottomX} ${decBottomY} L ${decBottomX} ${(decBottomY + succTopY) / 2} L ${succTopX} ${(decBottomY + succTopY) / 2} L ${succTopX} ${succTopY}`} 
+                          fill="none" 
+                          stroke="#059669" 
+                          strokeWidth="1.75" 
+                          markerEnd="url(#arrow-green-demo)"
+                        />
+                        <g>
+                          <rect x={decBottomX - 11} y={((decBottomY + succTopY) / 2) - 7} width="22" height="14" fill="#FFFFFF" stroke="#059669" strokeWidth="1" rx="2" />
+                          <text x={decBottomX} y={((decBottomY + succTopY) / 2) + 3.5} fill="#059669" fontSize="8" fontFamily="monospace" fontWeight="bold" textAnchor="middle">Yes</text>
+                        </g>
+
+                        {/* Decision to Decline (No) */}
+                        {decAlert && (
+                          <>
+                            <path 
+                              d={`M ${proc.x + 75} ${proc.y + 44} L ${proc.x + 75} ${decDeclineY - 10} L ${decDeclineX} ${decDeclineY - 10} L ${decDeclineX} ${decDeclineY}`} 
+                              fill="none" 
+                              stroke="#D45B33" 
+                              strokeWidth="1.75" 
+                              markerEnd="url(#arrow-demo)"
+                            />
+                            <g>
+                              <rect x={proc.x + 65} y={decDeclineY - 17} width="20" height="14" fill="#FFFFFF" stroke="#D45B33" strokeWidth="1" rx="2" />
+                              <text x={proc.x + 75} y={decDeclineY - 6.5} fill="#D45B33" fontSize="8" fontFamily="monospace" fontWeight="bold" textAnchor="middle">No</text>
+                            </g>
+                          </>
+                        )}
                       </>
                     );
                   })()}
@@ -610,28 +744,51 @@ export const Landing: React.FC = () => {
 
                     return (
                       <>
-                        {/* Lifelines */}
-                        <line x1={cX} y1={c.y + 40} x2={cX} y2={280} stroke="#15191C" strokeWidth="1.5" strokeDasharray="4 4" />
-                        <line x1={gX} y1={g.y + 40} x2={gX} y2={280} stroke="#1E5C8C" strokeWidth="1.5" strokeDasharray="4 4" />
-                        <line x1={dX} y1={d.y + 40} x2={dX} y2={280} stroke="#D45B33" strokeWidth="1.5" strokeDasharray="4 4" />
+                        {/* Lifelines beneath participants */}
+                        <line x1={cX} y1={c.y + 36} x2={cX} y2={280} stroke="#15191C" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.4" />
+                        <line x1={gX} y1={g.y + 36} x2={gX} y2={280} stroke="#15191C" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.4" />
+                        <line x1={dX} y1={d.y + 36} x2={dX} y2={280} stroke="#15191C" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.4" />
 
-                        {/* Request Call */}
-                        <path d={`M ${cX} 100 L ${gX} 100`} stroke="#15191C" strokeWidth="2" markerEnd="url(#arrow-demo)" />
-                        <text x={(cX + gX) / 2} y={92} fill="#15191C" fontSize="8.5" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                          POST /login
-                        </text>
+                        {/* Activation Bars */}
+                        <rect x={cX - 4} y="75" width="8" height="180" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
+                        <rect x={gX - 4} y="85" width="8" height="150" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
+                        <rect x={dX - 4} y="130" width="8" height="60" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
 
-                        {/* DB Query */}
-                        <path d={`M ${gX} 160 L ${dX} 160`} stroke="#1E5C8C" strokeWidth="2" markerEnd="url(#arrow-blue-demo)" />
-                        <text x={(gX + dX) / 2} y={152} fill="#1E5C8C" fontSize="8.5" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                          verify_auth()
-                        </text>
+                        {/* Message 1: POST /login */}
+                        <path d={`M ${cX + 4} 95 L ${gX - 4} 95`} stroke="#15191C" strokeWidth="1.75" markerEnd="url(#arrow-demo)" />
+                        <g>
+                          <rect x={(cX + gX) / 2 - 38} y="81" width="76" height="14" fill="#FFFFFF" stroke="#15191C" strokeWidth="1" rx="2" />
+                          <text x={(cX + gX) / 2} y="91.5" fill="#15191C" fontSize="8" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                            1. POST /login
+                          </text>
+                        </g>
 
-                        {/* Response */}
-                        <path d={`M ${gX} 220 L ${cX} 220`} stroke="#064E3B" strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#arrow-demo)" />
-                        <text x={(cX + gX) / 2} y={212} fill="#064E3B" fontSize="8.5" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                          200 OK (JWT)
-                        </text>
+                        {/* Message 2: verify_user() */}
+                        <path d={`M ${gX + 4} 145 L ${dX - 4} 145`} stroke="#1E5C8C" strokeWidth="1.75" markerEnd="url(#arrow-blue-demo)" />
+                        <g>
+                          <rect x={(gX + dX) / 2 - 40} y="131" width="80" height="14" fill="#FFFFFF" stroke="#1E5C8C" strokeWidth="1" rx="2" />
+                          <text x={(gX + dX) / 2} y="141.5" fill="#1E5C8C" fontSize="8" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                            2. verify_user()
+                          </text>
+                        </g>
+
+                        {/* Message 3: verified (ok) */}
+                        <path d={`M ${dX - 4} 180 L ${gX + 4} 180`} stroke="#15191C" strokeWidth="1.75" strokeDasharray="4 3" markerEnd="url(#arrow-demo)" />
+                        <g>
+                          <rect x={(gX + dX) / 2 - 42} y="166" width="84" height="14" fill="#FFFFFF" stroke="#15191C" strokeWidth="1" rx="2" />
+                          <text x={(gX + dX) / 2} y="176.5" fill="#15191C" fontSize="8" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                            3. verified (ok)
+                          </text>
+                        </g>
+
+                        {/* Message 4: 200 OK (JWT) */}
+                        <path d={`M ${gX - 4} 230 L ${cX + 4} 230`} stroke="#059669" strokeWidth="1.75" strokeDasharray="4 3" markerEnd="url(#arrow-green-demo)" />
+                        <g>
+                          <rect x={(cX + gX) / 2 - 44} y="216" width="88" height="14" fill="#FFFFFF" stroke="#059669" strokeWidth="1" rx="2" />
+                          <text x={(cX + gX) / 2} y="226.5" fill="#059669" fontSize="8" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                            4. 200 OK (JWT)
+                          </text>
+                        </g>
                       </>
                     );
                   })()}
@@ -647,19 +804,13 @@ export const Landing: React.FC = () => {
                         left: `${node.x}px`,
                         top: `${node.y}px`,
                       }}
-                      className="absolute select-none cursor-grab active:cursor-grabbing z-20"
+                      className="absolute select-none cursor-grab active:cursor-grabbing z-20 group"
                     >
-                      {/* 1. Database Table Node (Authentic ERD) */}
+                      {/* 1. Database Table Node (Authentic ERD matching Templates) */}
                       {node.type === 'table' && (
-                        <div className="w-[175px] border-2 border-ink bg-paper-raised shadow-hard-blueprint relative">
-                          {/* Connection Ports on 4 Edges */}
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -top-1.5 left-1/2 -translate-x-1/2 pointer-events-none" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -bottom-1.5 left-1/2 -translate-x-1/2 pointer-events-none" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -left-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-
+                        <div className="w-[170px] border-2 border-ink bg-paper-raised shadow-hard-blueprint relative">
                           {/* Table Header */}
-                          <div className="bg-blueprint text-white font-mono font-bold text-[11px] px-2.5 py-1.5 border-b-2 border-ink flex items-center justify-between">
+                          <div className="bg-[#1E5C8C] text-white font-mono font-bold text-[10.5px] px-2.5 py-1.5 border-b-2 border-ink flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
                               <Database className="w-3 h-3" />
                               <span>{node.label}</span>
@@ -668,19 +819,24 @@ export const Landing: React.FC = () => {
                           </div>
 
                           {/* Field Rows */}
-                          <div className="p-2 flex flex-col gap-1 font-mono text-[10px]">
+                          <div className="p-2 flex flex-col gap-1 font-mono text-[9.5px]">
                             {node.fields?.map((f, i) => (
                               <div key={i} className="flex items-center justify-between">
-                                <span className={f.isKey ? 'font-bold text-ink' : 'text-[#333C42]'}>
+                                <span className={f.isKey ? 'font-bold text-ink' : f.isFk ? 'font-bold text-[#1E5C8C]' : 'text-[#333C42]'}>
                                   {f.name}
                                 </span>
                                 <div className="flex items-center gap-1">
                                   {f.isKey && (
-                                    <span className="text-[8px] bg-amber-200 border border-ink px-1 text-ink font-bold">
+                                    <span className="text-[7.5px] bg-amber-200 border border-ink px-1 text-ink font-bold">
                                       PK
                                     </span>
                                   )}
-                                  <span className="text-ink-soft text-[9px]">{f.type}</span>
+                                  {f.isFk && (
+                                    <span className="text-[7.5px] bg-sky-200 border border-ink px-1 text-ink font-bold">
+                                      FK
+                                    </span>
+                                  )}
+                                  <span className="text-ink-soft text-[8.5px]">{f.type}</span>
                                 </div>
                               </div>
                             ))}
@@ -691,17 +847,11 @@ export const Landing: React.FC = () => {
                       {/* 2. Decision Diamond Node */}
                       {node.type === 'decision' && (
                         <div className="w-[60px] h-[60px] relative flex items-center justify-center">
-                          {/* Connection Ports on 4 Vertices */}
-                          <div className="w-2.5 h-2.5 rounded-full bg-signal border border-ink absolute -top-1.5 left-1/2 -translate-x-1/2 pointer-events-none z-30" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-signal border border-ink absolute -bottom-1.5 left-1/2 -translate-x-1/2 pointer-events-none z-30" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-signal border border-ink absolute -left-1.5 top-1/2 -translate-y-1/2 pointer-events-none z-30" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-signal border border-ink absolute -right-1.5 top-1/2 -translate-y-1/2 pointer-events-none z-30" />
-
                           <svg className="absolute inset-0 w-full h-full overflow-visible pointer-events-none" viewBox="0 0 60 60">
-                            <polygon points="32,2 62,32 32,62 2,32" fill="#D45B33" opacity="0.3" />
-                            <polygon points="30,0 60,30 30,60 0,30" fill="#FFFFFF" stroke="#15191C" strokeWidth="2" />
+                            <polygon points="32,2 62,32 32,62 2,32" fill="#D45B33" opacity="0.25" />
+                            <polygon points="30,0 60,30 30,60 0,30" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.75" />
                           </svg>
-                          <span className="relative z-20 font-mono text-[9px] font-bold text-center px-1 text-signal">
+                          <span className="relative z-20 font-mono text-[8.5px] font-bold text-center px-1 text-[#D45B33]">
                             {node.label}
                           </span>
                         </div>
@@ -709,7 +859,7 @@ export const Landing: React.FC = () => {
 
                       {/* 3. Terminal Capsule Node */}
                       {node.type === 'terminal' && (
-                        <div className="rounded-full border-2 border-ink bg-paper-raised px-4 py-1.5 shadow-hard-ink font-mono font-bold text-[10.5px] flex items-center justify-center gap-1.5 relative">
+                        <div className="rounded-full border-2 border-ink bg-paper-raised px-3.5 py-1.5 shadow-hard-ink font-mono font-bold text-[10px] flex items-center justify-center gap-1.5 relative">
                           <div className="w-2 h-2 rounded-full bg-emerald-500" />
                           <span className="text-ink">{node.label}</span>
                         </div>
@@ -717,19 +867,17 @@ export const Landing: React.FC = () => {
 
                       {/* 4. Process Card Node */}
                       {node.type === 'process' && (
-                        <div className="w-[140px] border-2 border-ink bg-paper-raised p-2 shadow-hard-blueprint relative font-mono">
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -top-1.5 left-1/2 -translate-x-1/2 pointer-events-none" />
-                          <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <div className="font-bold text-[11px] text-ink">{node.label}</div>
-                          {node.subtitle && <div className="text-[9px] text-ink-soft mt-0.5">{node.subtitle}</div>}
+                        <div className={`w-[150px] border-2 ${node.color === 'signal' ? 'border-signal shadow-hard-signal' : 'border-ink shadow-hard-blueprint'} bg-paper-raised p-2 relative font-mono`}>
+                          <div className={`font-bold text-[10.5px] ${node.color === 'signal' ? 'text-signal' : 'text-ink'}`}>{node.label}</div>
+                          {node.subtitle && <div className="text-[8.5px] text-ink-soft mt-0.5">{node.subtitle}</div>}
                         </div>
                       )}
 
                       {/* 5. Sequence Actor Node */}
                       {node.type === 'actor' && (
                         <div className="w-[100px] border-2 border-ink bg-paper-raised p-1.5 text-center shadow-hard-ink font-mono">
-                          <div className="font-bold text-[11px] text-ink">{node.label}</div>
-                          {node.subtitle && <div className="text-[8.5px] text-ink-soft">{node.subtitle}</div>}
+                          <div className="font-bold text-[10.5px] text-ink">{node.label}</div>
+                          {node.subtitle && <div className="text-[8px] text-ink-soft">{node.subtitle}</div>}
                         </div>
                       )}
                     </div>
@@ -1033,229 +1181,15 @@ export const Landing: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-6 min-h-[360px] flex-1 bg-grid relative flex items-center justify-center overflow-hidden">
-                {/* SVG Definitions for Arrows and Connectors */}
-                <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
-                  <defs>
-                    <marker id="arrow-sec5" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#15191C" />
-                    </marker>
-                    <marker id="arrow-sec5-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#1E5C8C" />
-                    </marker>
-                    <marker id="arrow-sec5-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#064E3B" />
-                    </marker>
-                    <marker id="crows-many-sec5" viewBox="0 0 20 20" refX="16" refY="10" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
-                      <line x1="2" y1="2" x2="16" y2="10" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                      <line x1="2" y1="18" x2="16" y2="10" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                      <line x1="2" y1="10" x2="16" y2="10" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                      <line x1="8" y1="3" x2="8" y2="17" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                    </marker>
-                    <marker id="crows-one-sec5" viewBox="0 0 20 20" refX="6" refY="10" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
-                      <line x1="6" y1="3" x2="6" y2="17" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                      <line x1="12" y1="3" x2="12" y2="17" stroke="#1E5C8C" strokeWidth="2" strokeLinecap="round" />
-                    </marker>
-                  </defs>
-
-                  {/* 1. ERD Connections (Orthogonal line with Crow's Foot) */}
-                  {activeCodePreset === 'erd' && (
-                    <path
-                      d="M 175 140 L 210 140 L 210 140 L 245 140"
-                      fill="none"
-                      stroke="#1E5C8C"
-                      strokeWidth="2"
-                      markerStart="url(#crows-one-sec5)"
-                      markerEnd="url(#crows-many-sec5)"
-                    />
-                  )}
-
-                  {/* 2. Sequence Diagram Lines & Arrows */}
-                  {activeCodePreset === 'sequence' && (
-                    <>
-                      {/* Lifelines */}
-                      <line x1="75" y1="48" x2="75" y2="280" stroke="#15191C" strokeWidth="1.5" strokeDasharray="4 4" />
-                      <line x1="210" y1="48" x2="210" y2="280" stroke="#1E5C8C" strokeWidth="1.5" strokeDasharray="4 4" />
-                      <line x1="345" y1="48" x2="345" y2="280" stroke="#D45B33" strokeWidth="1.5" strokeDasharray="4 4" />
-
-                      {/* 1. POST /login */}
-                      <path d="M 75 90 L 210 90" stroke="#15191C" strokeWidth="2" markerEnd="url(#arrow-sec5)" />
-                      <text x="142" y="82" fill="#15191C" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        1. POST /login
-                      </text>
-
-                      {/* 2. verify_user_record() */}
-                      <path d="M 210 145 L 345 145" stroke="#1E5C8C" strokeWidth="2" markerEnd="url(#arrow-sec5-blue)" />
-                      <text x="277" y="137" fill="#1E5C8C" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        2. verify_user()
-                      </text>
-
-                      {/* 3. auth_verified */}
-                      <path d="M 345 200 L 210 200" stroke="#15191C" strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#arrow-sec5)" />
-                      <text x="277" y="192" fill="#15191C" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        3. verified (ok)
-                      </text>
-
-                      {/* 4. 200 OK (access_token) */}
-                      <path d="M 210 255 L 75 255" stroke="#064E3B" strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#arrow-sec5-green)" />
-                      <text x="142" y="247" fill="#064E3B" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        4. 200 OK (jwt)
-                      </text>
-                    </>
-                  )}
-
-                  {/* 3. Flowchart Lines & Arrows */}
-                  {activeCodePreset === 'flowchart' && (
-                    <>
-                      {/* Start to Validate */}
-                      <path d="M 210 40 L 210 70" stroke="#15191C" strokeWidth="2" markerEnd="url(#arrow-sec5)" />
-                      {/* Validate to Decision */}
-                      <path d="M 210 115 L 210 145" stroke="#15191C" strokeWidth="2" markerEnd="url(#arrow-sec5)" />
-                      {/* Decision -> YES -> Complete */}
-                      <path d="M 245 175 L 330 175 L 330 220" fill="none" stroke="#064E3B" strokeWidth="2" markerEnd="url(#arrow-sec5-green)" />
-                      <text x="280" y="167" fill="#064E3B" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        YES
-                      </text>
-                      {/* Decision -> NO -> Decline */}
-                      <path d="M 175 175 L 90 175 L 90 220" fill="none" stroke="#D45B33" strokeWidth="2" markerEnd="url(#arrow-sec5)" />
-                      <text x="135" y="167" fill="#D45B33" fontSize="9" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                        NO
-                      </text>
-                    </>
-                  )}
-                </svg>
-
-                {/* Live Canvas Content Matching Diagrid Real App */}
-
-                {/* A. ERD Blueprint Presentation */}
-                {activeCodePreset === 'erd' && (
-                  <div className="flex items-center justify-between w-full max-w-[420px] relative z-20">
-                    {/* Users Table */}
-                    <div className="w-[170px] border-2 border-ink bg-paper-raised shadow-hard-blueprint relative">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <div className="bg-blueprint text-white font-mono font-bold text-[11px] px-2.5 py-1.5 border-b-2 border-ink flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Database className="w-3 h-3" />
-                          <span>users</span>
-                        </div>
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
-                      </div>
-                      <div className="p-2 flex flex-col gap-1 font-mono text-[10px]">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-ink">id</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[8px] bg-amber-200 border border-ink px-1 text-ink font-bold">PK</span>
-                            <span className="text-ink-soft text-[9px]">uuid</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between text-[#333C42]">
-                          <span>email</span>
-                          <span className="text-ink-soft text-[9px]">varchar</span>
-                        </div>
-                        <div className="flex items-center justify-between text-[#333C42]">
-                          <span>role</span>
-                          <span className="text-ink-soft text-[9px]">text</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Orders Table */}
-                    <div className="w-[170px] border-2 border-ink bg-paper-raised shadow-hard-blueprint relative">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink absolute -left-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <div className="bg-blueprint text-white font-mono font-bold text-[11px] px-2.5 py-1.5 border-b-2 border-ink flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Database className="w-3 h-3" />
-                          <span>orders</span>
-                        </div>
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
-                      </div>
-                      <div className="p-2 flex flex-col gap-1 font-mono text-[10px]">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-ink">id</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[8px] bg-amber-200 border border-ink px-1 text-ink font-bold">PK</span>
-                            <span className="text-ink-soft text-[9px]">uuid</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-blueprint">user_id</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[8px] bg-sky-200 border border-ink px-1 text-ink font-bold">FK</span>
-                            <span className="text-ink-soft text-[9px]">uuid</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between text-[#333C42]">
-                          <span>total_usd</span>
-                          <span className="text-ink-soft text-[9px]">numeric</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* B. Sequence Diagram Presentation */}
-                {activeCodePreset === 'sequence' && (
-                  <div className="w-full max-w-[420px] h-[280px] relative font-mono text-[11px] z-20">
-                    {/* Actors at top */}
-                    <div className="flex justify-between items-center">
-                      <div className="border-2 border-ink bg-paper-raised p-1.5 text-center shadow-hard-ink w-24">
-                        <div className="font-bold text-ink text-[10.5px]">Client App</div>
-                        <div className="text-[8px] text-ink-soft">Frontend</div>
-                      </div>
-                      <div className="border-2 border-ink bg-paper-raised p-1.5 text-center shadow-hard-blueprint w-24">
-                        <div className="font-bold text-blueprint text-[10.5px]">API Gateway</div>
-                        <div className="text-[8px] text-ink-soft">Edge Router</div>
-                      </div>
-                      <div className="border-2 border-ink bg-paper-raised p-1.5 text-center shadow-hard-ink w-24">
-                        <div className="font-bold text-ink text-[10.5px]">User DB</div>
-                        <div className="text-[8px] text-ink-soft">Postgres</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* C. Flowchart Presentation */}
-                {activeCodePreset === 'flowchart' && (
-                  <div className="w-full max-w-[420px] h-[280px] relative font-mono text-[11px] z-20 flex flex-col items-center">
-                    {/* Start Capsule */}
-                    <div className="rounded-full border-2 border-ink bg-paper-raised px-4 py-1 font-bold text-[10.5px] shadow-hard-ink flex items-center gap-1.5 absolute top-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span>START CHECKOUT</span>
-                    </div>
-
-                    {/* Validate Process Card */}
-                    <div className="w-[170px] border-2 border-ink bg-paper-raised p-2 shadow-hard-blueprint absolute top-[70px] text-center">
-                      <div className="font-bold text-[10.5px] text-ink">Validate Card Details</div>
-                      <div className="text-[8.5px] text-ink-soft mt-0.5">auth_gateway.check()</div>
-                    </div>
-
-                    {/* Decision Diamond */}
-                    <div className="w-[70px] h-[60px] absolute top-[145px] flex items-center justify-center">
-                      <svg className="absolute inset-0 w-full h-full overflow-visible pointer-events-none" viewBox="0 0 70 60">
-                        <polygon points="37,2 72,32 37,62 2,32" fill="#D45B33" opacity="0.25" />
-                        <polygon points="35,0 70,30 35,60 0,30" fill="#FFFFFF" stroke="#15191C" strokeWidth="2" />
-                      </svg>
-                      <span className="relative z-20 font-mono text-[8.5px] font-bold text-center px-1 text-signal leading-tight">
-                        Funds OK?
-                      </span>
-                    </div>
-
-                    {/* Decline Alert (Left Branch) */}
-                    <div className="w-[120px] border-2 border-signal bg-paper-raised p-1.5 shadow-hard-signal absolute top-[220px] left-[30px] text-center">
-                      <div className="font-bold text-[9.5px] text-signal">Decline Notice</div>
-                      <div className="text-[8px] text-ink-soft">Retry payment</div>
-                    </div>
-
-                    {/* Success (Right Branch) */}
-                    <div className="rounded-full border-2 border-emerald-600 bg-emerald-50 px-3 py-1.5 font-bold text-[9.5px] shadow-hard-ink text-emerald-800 flex items-center gap-1.5 absolute top-[220px] right-[30px]">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600" />
-                      <span>Confirm & Receipt</span>
-                    </div>
-                  </div>
-                )}
+              <div className="min-h-[380px] flex-1 relative flex items-center justify-center overflow-hidden bg-paper-raised p-4">
+                <TemplateThumbnail
+                  content={CODE_PRESETS[activeCodePreset].diagram}
+                  type={activeCodePreset}
+                  className="w-full h-full min-h-[340px]"
+                />
 
                 {/* Floating Bottom App Toolbar */}
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 flex items-center bg-paper-raised border-2 border-ink rounded-full shadow-hard-ink px-3 py-0.5 gap-2 font-mono text-[9.5px] select-none text-ink-soft">
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center bg-paper-raised border-2 border-ink rounded-full shadow-hard-ink px-3 py-0.5 gap-2 font-mono text-[9.5px] select-none text-ink-soft">
                   <span className="text-blueprint font-bold">App Studio Engine</span>
                   <span className="text-line">|</span>
                   <span>Auto-Formatted</span>
@@ -1287,7 +1221,7 @@ export const Landing: React.FC = () => {
                 <tr className="border-b-2 border-ink bg-ink text-paper font-bold">
                   <th className="p-4 uppercase tracking-wider">What You Need</th>
                   <th className="p-4 uppercase tracking-wider text-[#A6B2AD]">Other Whiteboard Tools</th>
-                  <th className="p-4 uppercase tracking-wider text-blueprint bg-[#1F272C]">
+                  <th className="p-4 uppercase tracking-wider text-[#60A5FA] bg-[#1F272C]">
                     Diagrid
                   </th>
                 </tr>
@@ -1301,9 +1235,9 @@ export const Landing: React.FC = () => {
                       Messy curved lines that tangle and cross over boxes
                     </span>
                   </td>
-                  <td className="p-4 bg-blueprint bg-opacity-10 font-bold text-ink border-l-2 border-blueprint">
-                    <span className="flex items-center gap-1.5 text-blueprint font-bold">
-                      <Check className="w-4 h-4 shrink-0" />
+                  <td className="p-4 bg-[#EBF3FA] dark:bg-[#152332] font-bold text-ink border-l-2 border-blueprint">
+                    <span className="flex items-center gap-1.5 text-[#1E5C8C] dark:text-[#60A5FA] font-bold">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       Neat 90-degree lines that turn cleanly and never tangle
                     </span>
                   </td>
@@ -1317,9 +1251,9 @@ export const Landing: React.FC = () => {
                       Plain sticky notes where you have to type everything by hand
                     </span>
                   </td>
-                  <td className="p-4 bg-blueprint bg-opacity-10 font-bold text-ink border-l-2 border-blueprint">
-                    <span className="flex items-center gap-1.5 text-blueprint font-bold">
-                      <Check className="w-4 h-4 shrink-0" />
+                  <td className="p-4 bg-[#EBF3FA] dark:bg-[#152332] font-bold text-ink border-l-2 border-blueprint">
+                    <span className="flex items-center gap-1.5 text-[#1E5C8C] dark:text-[#60A5FA] font-bold">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       Pre-made tables with built-in Key tags and column types
                     </span>
                   </td>
@@ -1333,9 +1267,9 @@ export const Landing: React.FC = () => {
                       Random fonts and distracting neon colors
                     </span>
                   </td>
-                  <td className="p-4 bg-blueprint bg-opacity-10 font-bold text-ink border-l-2 border-blueprint">
-                    <span className="flex items-center gap-1.5 text-blueprint font-bold">
-                      <Check className="w-4 h-4 shrink-0" />
+                  <td className="p-4 bg-[#EBF3FA] dark:bg-[#152332] font-bold text-ink border-l-2 border-blueprint">
+                    <span className="flex items-center gap-1.5 text-[#1E5C8C] dark:text-[#60A5FA] font-bold">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       Clean, professional blueprint style ready for any report
                     </span>
                   </td>
@@ -1349,9 +1283,9 @@ export const Landing: React.FC = () => {
                       Blurry screenshots that look messy when printed
                     </span>
                   </td>
-                  <td className="p-4 bg-blueprint bg-opacity-10 font-bold text-ink border-l-2 border-blueprint">
-                    <span className="flex items-center gap-1.5 text-blueprint font-bold">
-                      <Check className="w-4 h-4 shrink-0" />
+                  <td className="p-4 bg-[#EBF3FA] dark:bg-[#152332] font-bold text-ink border-l-2 border-blueprint">
+                    <span className="flex items-center gap-1.5 text-[#1E5C8C] dark:text-[#60A5FA] font-bold">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       Crisp PNG & SVG images plus Mermaid & PlantUML code exports
                     </span>
                   </td>
@@ -1365,9 +1299,9 @@ export const Landing: React.FC = () => {
                       Requires creating accounts, passwords, or paying monthly fees
                     </span>
                   </td>
-                  <td className="p-4 bg-blueprint bg-opacity-10 font-bold text-ink border-l-2 border-blueprint">
-                    <span className="flex items-center gap-1.5 text-blueprint font-bold">
-                      <Check className="w-4 h-4 shrink-0" />
+                  <td className="p-4 bg-[#EBF3FA] dark:bg-[#152332] font-bold text-ink border-l-2 border-blueprint">
+                    <span className="flex items-center gap-1.5 text-[#1E5C8C] dark:text-[#60A5FA] font-bold">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       Click and start drawing immediately — 100% free in your browser
                     </span>
                   </td>
@@ -1430,6 +1364,18 @@ export const Landing: React.FC = () => {
             <MessageSquare className="w-3.5 h-3.5" />
             Feedback
           </button>
+          <a
+            href="https://github.com/kurarensu16/diagrid"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white transition-colors flex items-center gap-1.5 font-mono"
+            title="GitHub Repository"
+          >
+            <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+            </svg>
+            GitHub
+          </a>
           <Link to="/admin" className="hover:text-white transition-colors text-signal flex items-center gap-1 font-bold">
             <ShieldAlert className="w-3.5 h-3.5" />
             Admin Console

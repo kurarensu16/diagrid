@@ -15,7 +15,8 @@ import {
 import { Link } from 'react-router-dom';
 import { Button } from './Button';
 import { Card } from './Card';
-import { mockAuth } from '../../services/mockAuth';
+import { adminService } from '../../services/adminService';
+import { authService } from '../../services/authService';
 
 interface FeedbackModalProps {
   isOpen: boolean;
@@ -38,36 +39,29 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose })
   const [hoverRating, setHoverRating] = useState<number>(0);
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
   const currentScore = hoverRating || rating;
   const currentRatingInfo = CSAT_RATINGS[currentScore - 1] || CSAT_RATINGS[4];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim()) return;
+    if (!message.trim() || isSubmitting) return;
 
-    const user = mockAuth.getUser();
-    const feedbackItem = {
-      id: `fb-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: user?.email || 'anonymous',
+    setIsSubmitting(true);
+    const user = authService.getUserSync();
+
+    await adminService.submitFeedback({
+      userEmail: user?.email || 'anonymous@diagrid.dev',
       type,
       rating,
       ratingLabel: currentRatingInfo.label,
       message: message.trim(),
-    };
+    });
 
-    try {
-      const stored = localStorage.getItem('diagrid_feedback');
-      const list = stored ? JSON.parse(stored) : [];
-      list.push(feedbackItem);
-      localStorage.setItem('diagrid_feedback', JSON.stringify(list));
-    } catch {
-      // Ignore storage errors
-    }
-
+    setIsSubmitting(false);
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);

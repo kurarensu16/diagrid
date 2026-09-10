@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { mockDb, type Template, type Project } from '../services/mockDb';
+import { templateService } from '../services/templateService';
+import { type Template, type Project } from '../services/mockDb';
 import { authService } from '../services/authService';
 import { projectService } from '../services/projectService';
 import { diagramService } from '../services/diagramService';
-import { mockAdmin, type TemplateConfig } from '../services/mockAdmin';
+import { adminService, type TemplateConfig } from '../services/adminService';
 import { TemplateThumbnail } from '../components/ui/TemplateThumbnail';
 import { 
   Eye, 
@@ -22,38 +23,38 @@ const TEMPLATE_DETAILS: Record<string, { desc: string; nodeCount: string; summar
     summary: 'Tables: users, projects, diagrams'
   },
   't-flowchart': {
-    desc: '5-step process flow tracking start terminal, drag action, decision branching, and end states.',
+    desc: '5-step workflow tracking start terminal, request action, decision branching, success and complete states.',
     nodeCount: '5 Steps • Decision Diamond',
     summary: 'Terminals, Process, Decision'
   },
   't-sequence': {
-    desc: 'Full API message sequence tracing interactions across Client User, API Gateway, and Postgres DB.',
-    nodeCount: '3 Actors • 4 Timed Calls',
+    desc: 'Standard message sequence tracing requests across Client App, API Gateway, and Database Server with lifeline activations.',
+    nodeCount: '3 Lifelines • 4 Timed Calls',
     summary: 'Lifelines & Async returns'
   },
   't-class': {
-    desc: 'Object-oriented code blueprint showing UserAccount and BillingPlan with method signatures and links.',
-    nodeCount: '2 Classes • Method Specs',
+    desc: 'Object-oriented clean architecture model showing UserController, UserService, and UserEntity with method signatures.',
+    nodeCount: '3 Classes • Method Specs',
     summary: 'UML class model'
   },
   't-gantt': {
-    desc: 'Project timeline roadmap tracking Sprint 1 Base Setup and Sprint 2 Canvas dependencies.',
-    nodeCount: '2 Sprints • Schedule Bar',
+    desc: 'Project release roadmap tracking Specifications, Core Engineering, and QA/Deployment milestone dependencies.',
+    nodeCount: '3 Phases • Schedule Bar',
     summary: 'Milestones & Dependencies'
   },
   't-dfd': {
-    desc: 'Level-1 Data Flow Diagram following credentials from Client through verification into the DB Store.',
-    nodeCount: 'Entity • Process • Store',
-    summary: 'Gane-Sarson data flow'
+    desc: 'Standard Level-1 Data Flow Diagram (Gane-Sarson) with External Entities, Process ID headers, Data Stores, and noun-phrase flows.',
+    nodeCount: '2 Entities • 2 Processes • 2 Stores',
+    summary: 'Gane-Sarson Level-1 DFD'
   },
   't-usecase': {
-    desc: 'System boundary layout showing Admin actor interactions with Authenticate and Audit use cases.',
-    nodeCount: '1 Actor • 2 Use Cases',
-    summary: 'System boundary & Goals'
+    desc: 'UML Use Case model showing System Boundary with Customer & Administrator actors linked to functional use case goals.',
+    nodeCount: '2 Actors • 3 Use Cases',
+    summary: 'System Boundary & Goals'
   },
   't-activity': {
-    desc: 'Concurrent activity workflow with validation decision, error path, and parallel fork/join bars.',
-    nodeCount: '9 States • Fork/Join Sync',
+    desc: 'Concurrent UML activity workflow with initial node (●), validation decision, error loop, fork/join parallel synchronization, and final node (◉).',
+    nodeCount: '10 States • Fork/Join Sync',
     summary: 'Parallel execution flow'
   }
 };
@@ -74,20 +75,21 @@ export const Templates: React.FC = () => {
   const [newDiagramTitle, setNewDiagramTitle] = useState('');
 
   useEffect(() => {
-    setTemplates(mockDb.getTemplates());
+    templateService.getTemplates().then((tmpls) => {
+      setTemplates(tmpls);
+    });
     projectService.getProjects().then((projs) => {
       setProjects(projs);
     });
     
     // Load admin configs to check for 'featured' and 'enabled' statuses
-    try {
-      const configs = mockAdmin.getTemplateConfigs();
+    adminService.getTemplateConfigs().then((configs) => {
       const map: Record<string, TemplateConfig> = {};
-      configs.forEach(c => { map[c.id] = c; });
+      configs.forEach((c) => { map[c.id] = c; });
       setTemplateConfigs(map);
-    } catch {
+    }).catch(() => {
       // fallback
-    }
+    });
   }, []);
 
   const handleCreateFromTemplate = async (e: React.FormEvent) => {
@@ -199,11 +201,11 @@ export const Templates: React.FC = () => {
                 {/* Top badges row */}
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-[10px] text-blueprint border-2 border-blueprint px-2 py-0.5 uppercase tracking-wider font-bold bg-blueprint bg-opacity-5">
+                    <span className="font-mono text-[10px] text-blueprint border-2 border-blueprint px-2 py-0.5 uppercase tracking-wider font-bold bg-[#EBF3FA] dark:bg-[#152332]">
                       {tmpl.type}
                     </span>
                     {isFeatured && (
-                      <span className="font-mono text-[10px] text-signal border-2 border-signal px-2 py-0.5 uppercase tracking-wider font-bold bg-signal bg-opacity-10 flex items-center gap-1">
+                      <span className="font-mono text-[10px] text-signal border-2 border-signal px-2 py-0.5 uppercase tracking-wider font-bold bg-[#FFF1EB] dark:bg-[#2A1510] flex items-center gap-1">
                         <Sparkles className="w-3 h-3" />
                         FEATURED
                       </span>
@@ -228,7 +230,7 @@ export const Templates: React.FC = () => {
                   <TemplateThumbnail content={tmpl.content} type={tmpl.type} />
 
                   {/* Hover Overlay with Preview Trigger */}
-                  <div className="absolute inset-0 bg-ink bg-opacity-70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-paper font-mono text-[12px] font-bold backdrop-blur-[1px]">
+                  <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-paper font-mono text-[12px] font-bold backdrop-blur-[1px]">
                     <div className="flex items-center gap-1.5 border border-paper px-3 py-1.5 bg-ink">
                       <Eye className="w-4 h-4 text-blueprint" />
                       <span>inspect_preview()</span>
@@ -269,7 +271,7 @@ export const Templates: React.FC = () => {
 
       {/* Full Screen Interactive Template Preview Modal */}
       {previewingTemplate && (
-        <div className="fixed inset-0 bg-ink bg-opacity-70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
           <div className="w-full max-w-4xl bg-paper border-2 border-ink shadow-hard-blueprint flex flex-col max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
             <div className="h-12 border-b-2 border-ink bg-ink text-paper px-6 flex items-center justify-between font-mono select-none">
@@ -328,7 +330,7 @@ export const Templates: React.FC = () => {
 
       {/* Select Project Dialog */}
       {selectedTemplate && (
-        <div className="fixed inset-0 bg-ink bg-opacity-70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
           <div className="w-full max-w-[480px]">
             <Card variant="blueprint" className="p-8 border-2 border-ink shadow-hard-blueprint">
               <div className="flex justify-between items-start mb-2">

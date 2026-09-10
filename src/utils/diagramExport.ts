@@ -306,13 +306,80 @@ export const generateStandaloneSvg = (
       `;
     }
 
+    if (node.type === 'activity-start') {
+      const r = width / 2;
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          <circle cx="${r}" cy="${r}" r="${r - 2}" fill="${isDark ? '#E1E5E3' : '#15191C'}" />
+        </g>
+      `;
+    }
+
+    if (node.type === 'activity-end') {
+      const r = width / 2;
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          <circle cx="${r}" cy="${r}" r="${r - 2}" fill="${effectiveFill === 'none' ? (isDark ? '#1C2226' : '#FFFFFF') : effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" />
+          <circle cx="${r}" cy="${r}" r="${r - 6}" fill="${isDark ? '#E1E5E3' : '#15191C'}" />
+        </g>
+      `;
+    }
+
+    if (node.type === 'activity-fork') {
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          <rect x="0" y="0" width="${width}" height="${height}" fill="${isDark ? '#E1E5E3' : '#15191C'}" rx="1" />
+        </g>
+      `;
+    }
+
+    if (node.type === 'activity-action') {
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" rx="12" fill="${shadowColor}" />` : ''}
+          <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+            ${escapeXml(node.label)}
+          </text>
+        </g>
+      `;
+    }
+
+    if (node.type === 'sequence-activation') {
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          <rect x="0" y="0" width="${width}" height="${height}" fill="${isDark ? '#1C2226' : '#FFFFFF'}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="1.5" />
+        </g>
+      `;
+    }
+
+    if (node.type === 'dfd-process') {
+      const splitIdx = node.label.indexOf(' ');
+      const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
+      const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+
+      return `
+        <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+          ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" rx="8" fill="${shadowColor}" />` : ''}
+          <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="0" y1="20" x2="${width}" y2="20" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="1.2" />
+          <text x="${width / 2}" y="14" fill="${isDark ? '#9BA3A9' : '#5A666E'}" font-size="9" font-family="'JetBrains Mono', monospace" font-weight="bold" text-anchor="middle">
+            ${escapeXml(processId)}
+          </text>
+          <text x="${width / 2}" y="${height / 2 + 10}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="middle">
+            ${escapeXml(processName)}
+          </text>
+        </g>
+      `;
+    }
+
     if (node.type === 'dfd-store') {
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" fill="${shadowColor}" />` : ''}
           <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" />
-          <line x1="0" y1="0" x2="${width}" y2="0" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
-          <line x1="0" y1="${height}" x2="${width}" y2="${height}" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="0" y1="0" x2="${width}" y2="0" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="0" y1="${height}" x2="${width}" y2="${height}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
           <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             [D] ${escapeXml(node.label)}
           </text>
@@ -324,8 +391,8 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" fill="${shadowColor}" />` : ''}
-          <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
-          <rect x="3" y="3" width="${width - 6}" height="${height - 6}" fill="none" stroke="#15191C" stroke-width="1" />
+          <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <rect x="3" y="3" width="${width - 6}" height="${height - 6}" fill="none" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="1" />
           <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>

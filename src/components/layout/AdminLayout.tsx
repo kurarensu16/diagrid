@@ -28,7 +28,7 @@ export const AdminLayout: React.FC = () => {
   const adminMenuItems = [
     { label: 'overview', path: '/admin', icon: BarChart2 },
     { label: 'users', path: '/admin/users', icon: Users },
-    { label: 'content', path: '/admin/content', icon: Database },
+    { label: 'storage', path: '/admin/storage', icon: Database },
     { label: 'feedback', path: '/admin/feedback', icon: MessageSquare },
     { label: 'activity_log', path: '/admin/activity', icon: Activity },
     { label: 'system_settings', path: '/admin/system', icon: Sliders },
@@ -102,7 +102,17 @@ export const AdminLayout: React.FC = () => {
             })}
           </div>
 
-          <div className="px-4 border-t border-line pt-4 mx-4">
+          <div className="px-4 border-t border-line pt-4 mx-4 flex flex-col gap-2">
+            <a
+              href="https://github.com/kurarensu16/diagrid"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-1.5 hover:text-ink hover:border-ink transition-colors text-ink-soft uppercase border border-line px-3 py-2 bg-paper font-mono text-[12px] cursor-pointer"
+              title="GitHub Repository"
+            >
+              github_repo()
+            </a>
+
             <button 
               onClick={handleLogout}
               className="w-full flex items-center justify-center gap-1.5 hover:text-signal hover:border-signal transition-colors text-ink uppercase border border-line px-3 py-2 bg-paper font-mono text-[12px] cursor-pointer"

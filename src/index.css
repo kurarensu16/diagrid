@@ -2,28 +2,128 @@
 @tailwind components;
 @tailwind utilities;
 
+:root,
+[data-theme="blueprint"] {
+  --bg-paper: #F6F7F5;
+  --bg-paper-raised: #FFFFFF;
+  --text-ink: #15191C;
+  --text-ink-soft: #4A5359;
+  --border-line: #D7DBD8;
+  --border-ink: #15191C;
+  --color-blueprint: #1E5C8C;
+  --color-signal: #D45B33;
+  --grid-line-color: #D7DBD8;
+  --grid-dot-color: #B8C0BA;
+  --card-shadow-blueprint: #1E5C8C;
+  --card-shadow-signal: #D45B33;
+  --card-shadow-ink: #15191C;
+  --scrollbar-track: #F6F7F5;
+  --scrollbar-thumb: #15191C;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg-paper: #0E1317;
+  --bg-paper-raised: #161D22;
+  --text-ink: #F0F6FC;
+  --text-ink-soft: #8B949E;
+  --border-line: #263038;
+  --border-ink: #388BFD;
+  --color-blueprint: #388BFD;
+  --color-signal: #F78166;
+  --grid-line-color: #1B242C;
+  --grid-dot-color: #344452;
+  --card-shadow-blueprint: #388BFD;
+  --card-shadow-signal: #F78166;
+  --card-shadow-ink: #000000;
+  --scrollbar-track: #0E1317;
+  --scrollbar-thumb: #2B353D;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-paper: #F8FAFC;
+  --bg-paper-raised: #FFFFFF;
+  --text-ink: #0F172A;
+  --text-ink-soft: #64748B;
+  --border-line: #E2E8F0;
+  --border-ink: #0F172A;
+  --color-blueprint: #2563EB;
+  --color-signal: #EA580C;
+  --grid-line-color: #E2E8F0;
+  --grid-dot-color: #CBD5E1;
+  --card-shadow-blueprint: #2563EB;
+  --card-shadow-signal: #EA580C;
+  --card-shadow-ink: #0F172A;
+  --scrollbar-track: #F8FAFC;
+  --scrollbar-thumb: #0F172A;
+  color-scheme: light;
+}
+
 @layer base {
   body {
     @apply bg-paper text-ink font-sans antialiased;
+    background-color: var(--bg-paper);
+    color: var(--text-ink);
+  }
+
+  input, textarea, select {
+    background-color: var(--bg-paper-raised);
+    color: var(--text-ink);
+    border-color: var(--border-line);
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--text-ink-soft);
+    opacity: 0.7;
   }
 }
 
 @layer utilities {
   .shadow-hard-blueprint {
-    box-shadow: 3px 3px 0px 0px #1E5C8C;
+    box-shadow: 3px 3px 0px 0px var(--card-shadow-blueprint);
   }
   .shadow-hard-signal {
-    box-shadow: 3px 3px 0px 0px #D45B33;
+    box-shadow: 3px 3px 0px 0px var(--card-shadow-signal);
   }
   .shadow-hard-ink {
-    box-shadow: 3px 3px 0px 0px #15191C;
+    box-shadow: 3px 3px 0px 0px var(--card-shadow-ink);
   }
   
-  .bg-grid {
+  .bg-grid,
+  .bg-grid-lines {
     background-image: 
-      linear-gradient(to bottom, #D7DBD8 1px, transparent 1px),
-      linear-gradient(to right, #D7DBD8 1px, transparent 1px);
+      linear-gradient(to bottom, var(--grid-line-color) 1px, transparent 1px),
+      linear-gradient(to right, var(--grid-line-color) 1px, transparent 1px);
     background-size: 20px 20px;
+  }
+
+  .bg-grid-dots {
+    background-image: radial-gradient(var(--grid-dot-color) 1.5px, transparent 1.5px);
+    background-size: 20px 20px;
+  }
+
+  .bg-grid-blank {
+    background-image: none !important;
+  }
+
+  /* Isolated Diagram Canvas: Diagrams always maintain clean drafting paper and dark ink colors regardless of UI theme */
+  .diagram-canvas {
+    --bg-paper: #F6F7F5;
+    --bg-paper-raised: #FFFFFF;
+    --text-ink: #15191C;
+    --text-ink-soft: #4A5359;
+    --border-line: #D7DBD8;
+    --border-ink: #15191C;
+    --color-blueprint: #1E5C8C;
+    --color-signal: #D45B33;
+    --grid-line-color: #D7DBD8;
+    --grid-dot-color: #B8C0BA;
+    --card-shadow-blueprint: #1E5C8C;
+    --card-shadow-signal: #D45B33;
+    --card-shadow-ink: #15191C;
+    background-color: #FFFFFF !important;
+    color: #15191C !important;
   }
 }
 
@@ -33,16 +133,16 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #F6F7F5;
-  border-left: 1px solid #D7DBD8;
-  border-top: 1px solid #D7DBD8;
+  background: var(--scrollbar-track);
+  border-left: 1px solid var(--border-line);
+  border-top: 1px solid var(--border-line);
 }
 ::-webkit-scrollbar-thumb {
-  background: #15191C;
+  background: var(--scrollbar-thumb);
   border-radius: 0px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4A5359;
+  opacity: 0.8;
 }
 
 /* Canvas styling */
@@ -54,8 +154,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1E5C8C;
-  border: 1px solid #15191C;
+  background: var(--color-blueprint);
+  border: 1px solid var(--text-ink);
   transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   z-index: 40;
   cursor: crosshair;
@@ -111,15 +211,15 @@
   position: absolute;
   width: 8px;
   height: 8px;
-  background: #FFFFFF;
-  border: 1.5px solid #1E5C8C;
+  background: var(--bg-paper-raised);
+  border: 1.5px solid var(--color-blueprint);
   z-index: 30;
   pointer-events: auto;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 .resize-handle:hover {
-  background: #1E5C8C;
-  border-color: #1E5C8C;
+  background: var(--color-blueprint);
+  border-color: var(--color-blueprint);
 }
 .resize-handle.handle-nw {
   top: -4px;

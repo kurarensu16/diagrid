@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '../ui/Button';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../../services/mockDb';
+import { adminService } from '../../services/adminService';
 import {
   type FreehandDrawing,
   type ExportFormat,
@@ -120,6 +121,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
         downloadBlob(blob, `${cleanTitle}.diagrid.json`);
       }
+
+      // Record export audit trail event
+      adminService.logActivity('exported_diagram', `${cleanTitle} (${format.toUpperCase()})`);
+
       onClose();
     } catch (err) {
       console.error('Export download error:', err);
@@ -168,7 +173,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-ink bg-opacity-70 flex items-center justify-center p-4 sm:p-6 z-50 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 sm:p-6 z-50 backdrop-blur-sm">
       <div className="w-full max-w-5xl bg-paper border-2 border-ink shadow-hard-blueprint flex flex-col max-h-[92vh] overflow-hidden">
         {/* Modal Header */}
         <div className="h-14 border-b-2 border-ink bg-ink text-paper px-6 flex items-center justify-between font-mono select-none">

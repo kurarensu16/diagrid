@@ -5,6 +5,9 @@ import type { Diagram, CanvasNode, CanvasEdge, EdgeMarkerType } from '../service
 import { diagramService } from '../services/diagramService';
 import { ExportModal } from '../components/canvas/ExportModal';
 import { ShareModal } from '../components/canvas/ShareModal';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { useCurrentUser } from '../services/mockAuth';
+import { authService } from '../services/authService';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
 import { 
   ArrowLeft, 
@@ -44,7 +47,10 @@ import {
   Sparkles,
   Eraser,
   Highlighter,
-  Maximize2
+  Maximize2,
+  Edit3,
+  Grid,
+  Magnet
 } from 'lucide-react';
 
 interface FreehandDrawing {
@@ -127,20 +133,33 @@ const SHADOW_COLOR_PRESETS = [
   { label: 'None', value: 'none', bg: '#D1D5DB' },
 ];
 
+/** Standard blueprint drafting color tokens for diagrams (diagrams remain clean & unaffected by UI themes) */
+const dc = {
+  ink: '#15191C',
+  inkSoft: '#4A5359',
+  paper: '#F6F7F5',
+  paperRaised: '#FFFFFF',
+  blueprint: '#1E5C8C',
+  signal: '#D45B33',
+  borderLine: '#D7DBD8',
+};
+
 export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: boolean }> = ({ type, isSelected }) => {
-  const stroke = isSelected ? '#FFFFFF' : '#15191C';
-  const circleFill = isSelected ? '#15191C' : '#FFFFFF';
+  // Use CSS currentColor so parent's text color determines the stroke (inherits theme)
+  const svgClass = `w-10 h-3.5 ${isSelected ? 'text-paper' : 'text-ink'}`;
+  const stroke = 'currentColor';
+  const circleFill = isSelected ? 'currentColor' : 'var(--bg-paper-raised)';
 
   if (type === 'none') {
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
       </svg>
     );
   }
   if (type === 'arrow') {
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="36" y2="7" stroke={stroke} strokeWidth="1.75" />
         <path d="M 28 2.5 L 37 7 L 28 11.5 z" fill={stroke} />
       </svg>
@@ -149,7 +168,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'zero-one') {
     // Zero or one: horizontal line with an open circle
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <circle cx="28" cy="7" r="4" fill={circleFill} stroke={stroke} strokeWidth="1.75" />
       </svg>
@@ -158,7 +177,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'many') {
     // Many: line branching into 3 prongs
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <line x1="22" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
         <line x1="22" y1="7" x2="38" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
@@ -168,7 +187,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'one') {
     // One: single vertical crossbar
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <line x1="30" y1="1.5" x2="30" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
       </svg>
@@ -177,7 +196,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'one-only') {
     // One (and only one): two vertical crossbars
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <line x1="24" y1="1.5" x2="24" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
         <line x1="31" y1="1.5" x2="31" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
@@ -187,7 +206,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'zero-many') {
     // Zero or many: circle followed by 3 prongs
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <circle cx="19" cy="7" r="3.5" fill={circleFill} stroke={stroke} strokeWidth="1.75" />
         <line x1="22.5" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
@@ -198,7 +217,7 @@ export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: 
   if (type === 'one-many') {
     // One or many: vertical bar followed by 3 prongs
     return (
-      <svg className="w-10 h-3.5" viewBox="0 0 40 14">
+      <svg className={svgClass} viewBox="0 0 40 14">
         <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
         <line x1="21" y1="1.5" x2="21" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
         <line x1="22" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
@@ -568,16 +587,67 @@ export const Editor: React.FC = () => {
   };
 
   // Clear all canvas contents
+  const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
+
   const handleClearCanvas = () => {
     if (nodes.length === 0 && edges.length === 0 && drawings.length === 0) return;
-    if (window.confirm('Clear all shapes and connections on the canvas?')) {
-      setNodes([]);
-      setEdges([]);
-      setDrawings([]);
-      setSelectedNodeIds([]);
-      setSelectedEdgeId(null);
-      saveHistoryState([], [], []);
+    setIsConfirmClearOpen(true);
+  };
+
+  const handleClearCanvasConfirm = () => {
+    setNodes([]);
+    setEdges([]);
+    setDrawings([]);
+    setSelectedNodeIds([]);
+    setSelectedEdgeId(null);
+    saveHistoryState([], [], []);
+  };
+
+  // Diagram Title inline editing
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+
+  const handleStartEditTitle = () => {
+    if (!diagram) return;
+    setTitleInput(diagram.title);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = async () => {
+    if (!diagram || !titleInput.trim()) {
+      setIsEditingTitle(false);
+      return;
     }
+    const newTitle = titleInput.trim();
+    if (newTitle !== diagram.title) {
+      setDiagram(prev => prev ? { ...prev, title: newTitle } : null);
+      await diagramService.updateDiagramMetadata(diagram.id, { title: newTitle });
+    }
+    setIsEditingTitle(false);
+  };
+
+  // User Preferences
+  const currentUser = useCurrentUser();
+  const [canvasGridStyle, setCanvasGridStyle] = useState<'lines' | 'dots' | 'blank'>('lines');
+  const [isSnapToGrid, setIsSnapToGrid] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.gridStyle) setCanvasGridStyle(currentUser.gridStyle);
+      if (currentUser.snapToGrid !== undefined) setIsSnapToGrid(currentUser.snapToGrid);
+    }
+  }, [currentUser]);
+
+  const handleToggleGridStyle = () => {
+    const nextStyle = canvasGridStyle === 'lines' ? 'dots' : canvasGridStyle === 'dots' ? 'blank' : 'lines';
+    setCanvasGridStyle(nextStyle);
+    authService.updateProfile({ gridStyle: nextStyle }).catch(() => {});
+  };
+
+  const handleToggleSnap = () => {
+    const nextSnap = !isSnapToGrid;
+    setIsSnapToGrid(nextSnap);
+    authService.updateProfile({ snapToGrid: nextSnap }).catch(() => {});
   };
 
   // Magnetic alignment guide lines during node drag
@@ -1784,11 +1854,11 @@ export const Editor: React.FC = () => {
       }
     }
 
-    // If not magnetically snapped to center, snap to fine 10px grid
-    if (!xSnapped) snappedX = Math.round(rawX / 10) * 10;
-    if (!ySnapped) snappedY = Math.round(rawY / 10) * 10;
+    // If not magnetically snapped to center, snap to 20px grid or allow fluid freeform
+    if (!xSnapped) snappedX = isSnapToGrid ? Math.round(rawX / 20) * 20 : Math.round(rawX);
+    if (!ySnapped) snappedY = isSnapToGrid ? Math.round(rawY / 20) * 20 : Math.round(rawY);
 
-    setAlignmentGuides(guides);
+    setAlignmentGuides(isSnapToGrid ? guides : []);
 
     const effectiveDeltaX = snappedX - primaryInitial.x;
     const effectiveDeltaY = snappedY - primaryInitial.y;
@@ -2488,10 +2558,41 @@ export const Editor: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           
-          <div className="min-w-0">
-            <h1 className="text-[14px] sm:text-[16px] font-bold tracking-tight truncate max-w-[140px] sm:max-w-[260px] md:max-w-[400px]">
-              {diagram.title}
-            </h1>
+          <div className="min-w-0 flex flex-col">
+            {isEditingTitle ? (
+              <form 
+                onSubmit={(e) => { 
+                  e.preventDefault(); 
+                  handleSaveTitle(); 
+                }} 
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  autoFocus
+                  className="px-2 py-0.5 border border-ink bg-paper text-[13px] sm:text-[15px] font-bold font-sans text-ink focus:outline-none focus:border-blueprint max-w-[160px] sm:max-w-[280px] md:max-w-[360px]"
+                />
+              </form>
+            ) : (
+              <div 
+                className="flex items-center gap-1.5 group cursor-pointer" 
+                onClick={handleStartEditTitle} 
+                title="Click to rename diagram"
+              >
+                <h1 className="text-[14px] sm:text-[16px] font-bold tracking-tight truncate max-w-[140px] sm:max-w-[260px] md:max-w-[400px] group-hover:text-blueprint transition-colors">
+                  {diagram.title}
+                </h1>
+                <Edit3 className="w-3.5 h-3.5 text-ink-soft opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </div>
+            )}
             <div className="font-mono text-[9.5px] sm:text-[10px] text-ink-soft uppercase hidden sm:block">
               Visual Blueprint Canvas
             </div>
@@ -2503,7 +2604,7 @@ export const Editor: React.FC = () => {
           <button
             type="button"
             onClick={autoAlignNodes}
-            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 border border-line hover:border-ink bg-paper text-[11px] text-ink hover:text-blueprint transition-colors cursor-pointer"
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 border border-line hover:border-ink bg-paper text-[11px] text-ink hover:text-blueprint transition-colors cursor-pointer"
             title="Auto-align and tidy connected shapes"
           >
             <Wand2 className="w-3.5 h-3.5 text-blueprint" />
@@ -3145,7 +3246,11 @@ export const Editor: React.FC = () => {
           onMouseLeave={handleMouseUp}
           onWheel={handleCanvasWheel}
           onContextMenu={(e) => handleContextMenu(e, null)}
-          className={`flex-1 bg-grid relative overflow-hidden bg-paper-raised ${
+          className={`flex-1 relative overflow-hidden diagram-canvas ${
+            canvasGridStyle === 'dots' ? 'bg-grid-dots' :
+            canvasGridStyle === 'blank' ? 'bg-grid-blank' :
+            'bg-grid-lines'
+          } ${
             activeMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : 
             activeMode === 'mark' ? 'cursor-crosshair' : 
             activeMode === 'draw' ? (pencilTool === 'eraser' ? 'cursor-cell' : 'cursor-crosshair') : 'cursor-default'
@@ -3200,7 +3305,7 @@ export const Editor: React.FC = () => {
                   className={`px-2.5 py-1 border-l border-ink flex items-center gap-1.5 transition-colors cursor-pointer ${
                     pencilTool === 'highlighter' ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
                   }`}
-                  title="Highlighter (Semi-transparent)"
+                  title="Highlighter (Translucent Stroke)"
                 >
                   <Highlighter className="w-3.5 h-3.5" />
                   <span className="text-[11px]">Highlighter</span>
@@ -3209,9 +3314,9 @@ export const Editor: React.FC = () => {
                   type="button"
                   onClick={() => setPencilTool('eraser')}
                   className={`px-2.5 py-1 border-l border-ink flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    pencilTool === 'eraser' ? 'bg-signal text-paper font-bold' : 'text-ink-soft hover:text-signal'
+                    pencilTool === 'eraser' ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
                   }`}
-                  title="Eraser (Click or sweep over strokes to erase)"
+                  title="Eraser (Click or drag over strokes to delete)"
                 >
                   <Eraser className="w-3.5 h-3.5" />
                   <span className="text-[11px]">Eraser</span>
@@ -3228,14 +3333,14 @@ export const Editor: React.FC = () => {
                         key={preset.value}
                         type="button"
                         onClick={() => setPencilColor(preset.value)}
-                        className={`w-4 h-4 rounded-full border-2 transition-transform cursor-pointer ${
-                          pencilColor.toLowerCase() === preset.value.toLowerCase() ? 'scale-125 border-ink ring-1 ring-ink' : 'border-transparent hover:scale-110'
+                        className={`w-5 h-5 rounded-full border border-ink transition-transform cursor-pointer ${
+                          pencilColor === preset.value ? 'scale-125 ring-2 ring-blueprint' : 'hover:scale-110'
                         }`}
                         style={{ backgroundColor: preset.value }}
                         title={preset.label}
                       />
                     ))}
-                    <label className="w-4 h-4 rounded-full border border-line flex items-center justify-center cursor-pointer hover:border-ink relative overflow-hidden ml-0.5" title="Custom color">
+                    <label className="w-5 h-5 rounded-full border border-dashed border-ink flex items-center justify-center cursor-pointer relative overflow-hidden ml-0.5" title="Custom color">
                       <input
                         type="color"
                         value={pencilColor}
@@ -3282,7 +3387,7 @@ export const Editor: React.FC = () => {
                     className="p-1 border border-line hover:border-signal text-ink-soft hover:text-signal transition-colors cursor-pointer flex items-center gap-1 text-[10px]"
                     title="Clear all drawings"
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <Trash2 className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Clear</span>
                   </button>
                 </>
@@ -3396,8 +3501,30 @@ export const Editor: React.FC = () => {
             </button>
           </div>
 
-          {/* Canvas Floating Zoom controls */}
+          {/* Canvas Floating Zoom & Grid controls */}
           <div className="absolute top-4 right-4 z-10 flex border border-line bg-paper-raised shadow-hard-ink font-mono text-[11px] select-none">
+            {/* Grid Pattern Selector */}
+            <button 
+              onClick={handleToggleGridStyle} 
+              className="px-2 py-1.5 border-r border-line hover:bg-paper flex items-center gap-1 cursor-pointer text-[10.5px] text-ink-soft hover:text-ink" 
+              title={`Grid Pattern: ${canvasGridStyle} (Click to switch)`}
+            >
+              <Grid className="w-3.5 h-3.5 text-blueprint" />
+              <span className="hidden sm:inline uppercase text-[9.5px]">{canvasGridStyle}</span>
+            </button>
+
+            {/* Magnetic Snap toggle */}
+            <button 
+              onClick={handleToggleSnap} 
+              className={`px-2 py-1.5 border-r border-line hover:bg-paper flex items-center gap-1 cursor-pointer text-[10.5px] ${
+                isSnapToGrid ? 'text-blueprint font-bold bg-blueprint/5' : 'text-ink-soft'
+              }`} 
+              title={isSnapToGrid ? "Magnetic Snap: 20px ON" : "Magnetic Snap: OFF (Freeform)"}
+            >
+              <Magnet className={`w-3.5 h-3.5 ${isSnapToGrid ? 'text-blueprint' : 'text-ink-soft'}`} />
+              <span className="hidden sm:inline">{isSnapToGrid ? 'Snap' : 'Free'}</span>
+            </button>
+
             <button onClick={handleZoomOut} className="px-2.5 py-1.5 border-r border-line hover:bg-paper flex items-center justify-center cursor-pointer" title="Zoom Out">
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
@@ -3436,7 +3563,7 @@ export const Editor: React.FC = () => {
                   markerHeight="6"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#15191C" />
+                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={dc.ink} />
                 </marker>
                 <marker
                   id="arrow-selected"
@@ -3447,7 +3574,7 @@ export const Editor: React.FC = () => {
                   markerHeight="6"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#1E5C8C" />
+                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={dc.blueprint} />
                 </marker>
 
                 {/* Crow's Foot: One (|) */}
@@ -3460,8 +3587,8 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
                 </marker>
                 <marker
                   id="crows-one-selected"
@@ -3472,8 +3599,8 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
                 </marker>
 
                 {/* Crow's Foot: One and only one (||) */}
@@ -3486,9 +3613,9 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <line x1="7" y1="2" x2="7" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <line x1="7" y1="2" x2="7" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
                 </marker>
                 <marker
                   id="crows-one-only-selected"
@@ -3499,9 +3626,9 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <line x1="7" y1="2" x2="7" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <line x1="7" y1="2" x2="7" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
                 </marker>
 
                 {/* Crow's Foot: Zero or One (o|) */}
@@ -3514,8 +3641,8 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <circle cx="10" cy="8" r="3.75" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <circle cx="10" cy="8" r="3.75" fill={dc.paperRaised} stroke={dc.ink} strokeWidth="1.5" />
                 </marker>
                 <marker
                   id="crows-zero-one-selected"
@@ -3526,8 +3653,8 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <circle cx="10" cy="8" r="3.75" fill="#FFFFFF" stroke="#1E5C8C" strokeWidth="2.2" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <circle cx="10" cy="8" r="3.75" fill={dc.paperRaised} stroke={dc.blueprint} strokeWidth="2.2" />
                 </marker>
 
                 {/* Crow's Foot: Many (3-prong fork) */}
@@ -3540,9 +3667,9 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
                 </marker>
                 <marker
                   id="crows-many-selected"
@@ -3553,9 +3680,9 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
                 </marker>
 
                 {/* Crow's Foot: One or More / One or Many (|{) */}
@@ -3568,10 +3695,10 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <line x1="4" y1="2" x2="4" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <line x1="4" y1="2" x2="4" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
                 </marker>
                 <marker
                   id="crows-one-many-selected"
@@ -3582,10 +3709,10 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <line x1="4" y1="2" x2="4" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <line x1="4" y1="2" x2="4" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
                 </marker>
 
                 {/* Crow's Foot: Zero or More / Zero-Many (o{) */}
@@ -3598,10 +3725,10 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#15191C" strokeWidth="1.5" />
-                  <circle cx="4" cy="8" r="3" fill="#FFFFFF" stroke="#15191C" strokeWidth="1.5" />
-                  <line x1="7" y1="8" x2="15.5" y2="2" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="7" y1="8" x2="15.5" y2="14" stroke="#15191C" strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
+                  <circle cx="4" cy="8" r="3" fill={dc.paperRaised} stroke={dc.ink} strokeWidth="1.5" />
+                  <line x1="7" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
+                  <line x1="7" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
                 </marker>
                 <marker
                   id="crows-zero-many-selected"
@@ -3612,10 +3739,10 @@ export const Editor: React.FC = () => {
                   markerHeight="16"
                   orient="auto-start-reverse"
                 >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke="#1E5C8C" strokeWidth="2.5" />
-                  <circle cx="4" cy="8" r="3" fill="#FFFFFF" stroke="#1E5C8C" strokeWidth="2.2" />
-                  <line x1="7" y1="8" x2="15.5" y2="2" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="7" y1="8" x2="15.5" y2="14" stroke="#1E5C8C" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
+                  <circle cx="4" cy="8" r="3" fill={dc.paperRaised} stroke={dc.blueprint} strokeWidth="2.2" />
+                  <line x1="7" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="7" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
                 </marker>
               </defs>
 
@@ -3634,7 +3761,7 @@ export const Editor: React.FC = () => {
                       y1={startY}
                       x2={startX}
                       y2={endY}
-                      stroke="#4A5359"
+                      stroke={dc.inkSoft}
                       strokeWidth="1.5"
                       strokeDasharray="4 4"
                     />
@@ -3655,7 +3782,7 @@ export const Editor: React.FC = () => {
                       <path
                         d={draw.path}
                         fill="none"
-                        stroke="#1E5C8C"
+                        stroke={dc.blueprint}
                         strokeWidth={strokeWidth + 6}
                         strokeOpacity={0.35}
                         strokeLinecap="round"
@@ -3667,7 +3794,7 @@ export const Editor: React.FC = () => {
                     <path
                       d={draw.path}
                       fill="none"
-                      stroke={isSelected ? '#1E5C8C' : strokeColor}
+                      stroke={isSelected ? dc.blueprint : strokeColor}
                       strokeWidth={strokeWidth}
                       strokeOpacity={strokeOpacity}
                       strokeLinecap="round"
@@ -3774,7 +3901,7 @@ export const Editor: React.FC = () => {
                           key={`edge-${edge.id}-${isSelected ? '1' : '0'}`}
                           d={path}
                           fill="none"
-                          stroke={isSelected ? '#1E5C8C' : '#15191C'}
+                          stroke={isSelected ? dc.blueprint : dc.ink}
                           strokeWidth={isSelected ? '2.5' : '1.5'}
                           strokeDasharray={edge.style === 'dashed' ? '5 5' : undefined}
                           markerStart={markerStartUrl}
@@ -3803,15 +3930,15 @@ export const Editor: React.FC = () => {
                           y={labelY - 9}
                           width={edge.label.length * 7 + 16}
                           height="18"
-                          fill="#FFFFFF"
-                          stroke="#15191C"
+                          fill={dc.paperRaised}
+                          stroke={dc.ink}
                           strokeWidth="1.5"
                           rx="2"
                         />
                         <text
                           x={labelX}
                           y={labelY + 3.5}
-                          fill="#15191C"
+                          fill={dc.ink}
                           className="font-mono text-[10px] font-bold select-none text-center"
                           textAnchor="middle"
                         >
@@ -3835,7 +3962,7 @@ export const Editor: React.FC = () => {
                       y1={start.y}
                       x2={tempEdgeEnd.x}
                       y2={tempEdgeEnd.y}
-                      stroke={snappedPort ? "#00A8FF" : "#1E5C8C"}
+                      stroke={snappedPort ? "#00A8FF" : dc.blueprint}
                       strokeWidth={snappedPort ? "2" : "1.5"}
                       strokeDasharray="4 4"
                       markerEnd="url(#arrow)"
@@ -3863,7 +3990,7 @@ export const Editor: React.FC = () => {
                   y1={guide.y1}
                   x2={guide.x2}
                   y2={guide.y2}
-                  stroke="#1E5C8C"
+                  stroke={dc.blueprint}
                   strokeWidth="1.5"
                   strokeDasharray="4 4"
                   className="pointer-events-none"
@@ -4035,8 +4162,8 @@ export const Editor: React.FC = () => {
                           {/* Diamond Body */}
                           <polygon
                             points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`}
-                            fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : '#FFFFFF'}
-                            stroke={isSelected ? '#1E5C8C' : '#15191C'}
+                            fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : dc.paperRaised}
+                            stroke={isSelected ? dc.blueprint : dc.ink}
                             strokeWidth={node.borderWidth || (isSelected ? 2 : 1.5)}
                             strokeDasharray={node.borderStyle === 'dashed' ? '5 5' : node.borderStyle === 'dotted' ? '2 2' : undefined}
                           />
@@ -4045,13 +4172,13 @@ export const Editor: React.FC = () => {
                         {/* Draw.io-style Dashed Bounding Box & 4 Corner Handles on Selection */}
                         {isSelected && (
                           <>
-                            <div className="absolute inset-0 border border-dashed border-[#1E5C8C] pointer-events-none" />
-                            <div className="absolute -top-1 -left-1 w-2.5 h-2.5 rounded-full bg-[#1E5C8C] border border-white pointer-events-none" />
-                            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#1E5C8C] border border-white pointer-events-none" />
-                            <div className="absolute -bottom-1 -left-1 w-2.5 h-2.5 rounded-full bg-[#1E5C8C] border border-white pointer-events-none" />
-                            <div className="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#1E5C8C] border border-white pointer-events-none" />
+                            <div className="absolute inset-0 border border-dashed border-blueprint pointer-events-none" />
+                            <div className="absolute -top-1 -left-1 w-2.5 h-2.5 rounded-full bg-blueprint border border-paper-raised pointer-events-none" />
+                            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-blueprint border border-paper-raised pointer-events-none" />
+                            <div className="absolute -bottom-1 -left-1 w-2.5 h-2.5 rounded-full bg-blueprint border border-paper-raised pointer-events-none" />
+                            <div className="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-blueprint border border-paper-raised pointer-events-none" />
                             <div 
-                              className="absolute -top-5 right-0 text-[#1E5C8C] text-[12px] font-bold pointer-events-none select-none flex items-center justify-center w-4 h-4 rounded-full bg-paper border border-[#1E5C8C] shadow-sm"
+                              className="absolute -top-5 right-0 text-blueprint text-[12px] font-bold pointer-events-none select-none flex items-center justify-center w-4 h-4 rounded-full bg-paper border border-blueprint shadow-sm"
                               title="Rotate"
                             >
                               ↻
@@ -4244,8 +4371,9 @@ export const Editor: React.FC = () => {
                   top: `${top}px`,
                   width: `${width}px`,
                   height: `${height}px`,
+                  backgroundColor: 'rgba(30, 92, 140, 0.12)',
                 }}
-                className="absolute border border-dashed border-blueprint bg-blueprint bg-opacity-5 pointer-events-none z-30"
+                className="absolute border-2 border-dashed border-blueprint pointer-events-none z-30"
               />
             );
           })()}
@@ -5593,6 +5721,18 @@ export const Editor: React.FC = () => {
         nodes={nodes}
         edges={edges}
         drawings={drawings}
+      />
+
+      {/* Clear Canvas Confirmation Modal */}
+      <ConfirmModal
+        isOpen={isConfirmClearOpen}
+        onClose={() => setIsConfirmClearOpen(false)}
+        onConfirm={handleClearCanvasConfirm}
+        title="CLEAR_CANVAS"
+        message="Clear all shapes and connections on the canvas?"
+        description={`This will erase all ${nodes.length} node(s), ${edges.length} connector(s), and freehand drawings from the active drafting sheet.`}
+        confirmText="Clear Canvas"
+        danger={true}
       />
     </div>
   );

@@ -8,16 +8,16 @@ export default {
     extend: {
       colors: {
         ink: {
-          DEFAULT: '#15191C',
-          soft: '#4A5359',
+          DEFAULT: 'var(--text-ink, #15191C)',
+          soft: 'var(--text-ink-soft, #4A5359)',
         },
         paper: {
-          DEFAULT: '#F6F7F5',
-          raised: '#FFFFFF',
+          DEFAULT: 'var(--bg-paper, #F6F7F5)',
+          raised: 'var(--bg-paper-raised, #FFFFFF)',
         },
-        line: '#D7DBD8',
-        blueprint: '#1E5C8C',
-        signal: '#D45B33',
+        line: 'var(--border-line, #D7DBD8)',
+        blueprint: 'var(--color-blueprint, #1E5C8C)',
+        signal: 'var(--color-signal, #D45B33)',
       },
       fontFamily: {
         sans: ['"Space Grotesk"', 'sans-serif'],

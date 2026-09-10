@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { authService } from './authService';
 import { mockDb, type Project } from './mockDb';
+import { adminService } from './adminService';
 
 export interface ProjectWithStats extends Project {
   diagramCount?: number;
@@ -145,6 +146,10 @@ export const projectService = {
 
       // Keep local mockDb mirrored
       mockDb.createProject(name, description);
+
+      // Audit log trigger
+      adminService.logActivity('created_project', name.trim(), user.email);
+
       return newProj;
     } catch {
       return mockDb.createProject(name, description);
@@ -192,7 +197,8 @@ export const projectService = {
    * Deletes a project and all associated diagrams (cascades automatically).
    */
   deleteProject: async (id: string): Promise<boolean> => {
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
+    const user = authService.getUserSync();
+    if (!isSupabaseConfigured() || !user) {
       mockDb.deleteProject(id);
       return true;
     }
@@ -204,6 +210,12 @@ export const projectService = {
         .eq('id', id);
 
       mockDb.deleteProject(id);
+
+      // Audit log trigger
+      if (!error) {
+        adminService.logActivity('deleted_project', `Project ${id}`, user.email);
+      }
+
       return !error;
     } catch {
       mockDb.deleteProject(id);
