@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in to Diagrid</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F6F7F5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #15191C; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F6F7F5; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #FFFFFF; border: 1.5px solid #15191C; box-shadow: 4px 4px 0px 0px #15191C; border-collapse: collapse;">
+          
+          <!-- Header Bar -->
+          <tr>
+            <td style="background-color: #15191C; padding: 20px 28px; border-bottom: 2px solid #15191C;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="left">
+                    <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 18px; font-weight: 700; color: #FFFFFF; letter-spacing: -0.5px;">
+                      [+] diagrid
+                    </span>
+                  </td>
+                  <td align="right">
+                    <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: #A6B2AD; text-transform: uppercase;">
+                      // magic_session
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Main Body Content -->
+          <tr>
+            <td style="padding: 36px 32px 28px 32px;">
+              <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; font-weight: 700; color: #1E5C8C; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+                INSTANT_LOGIN_REQUEST
+              </div>
+
+              <h1 style="font-size: 22px; font-weight: 700; color: #15191C; margin: 0 0 14px 0; line-height: 1.3;">
+                Your one-click sign in link
+              </h1>
+
+              <p style="font-size: 14px; line-height: 1.6; color: #4A5359; margin: 0 0 24px 0;">
+                Click the button below to instantly sign in to your <strong>Diagrid</strong> account without needing a password.
+              </p>
+
+              <!-- Action Button -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 28px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display: inline-block; background-color: #15191C; color: #FFFFFF; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; font-weight: 700; text-decoration: none; padding: 14px 28px; border: 1.5px solid #15191C; box-shadow: 3px 3px 0px 0px #1E5C8C; text-align: center;">
+                      authenticate_session() &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Fallback Link Box -->
+              <div style="background-color: #F6F7F5; border: 1px dashed #D7DBD8; padding: 14px; margin: 24px 0 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; color: #4A5359; word-break: break-all;">
+                <div style="font-weight: 700; color: #15191C; margin-bottom: 6px;">// or copy and paste this URL:</div>
+                <a href="{{ .ConfirmationURL }}" target="_blank" style="color: #1E5C8C; text-decoration: underline;">
+                  {{ .ConfirmationURL }}
+                </a>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Security Notice -->
+          <tr>
+            <td style="padding: 0 32px 28px 32px;">
+              <p style="font-size: 12px; line-height: 1.5; color: #8E9B95; margin: 0; border-top: 1px solid #E5E8E6; padding-top: 18px;">
+                This link can only be used once and expires in 15 minutes. Never share this link with anyone.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #FAFAFA; border-top: 1px solid #E5E8E6; padding: 16px 32px; text-align: center;">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: #8E9B95;">
+                diagrid &bull; passwordless authentication
+              </span>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

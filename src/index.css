@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .shadow-hard-blueprint {
+    box-shadow: 3px 3px 0px 0px #1E5C8C;
+  }
+  .shadow-hard-signal {
+    box-shadow: 3px 3px 0px 0px #D45B33;
+  }
+  .shadow-hard-ink {
+    box-shadow: 3px 3px 0px 0px #15191C;
+  }
+  
+  .bg-grid {
+    background-image: 
+      linear-gradient(to bottom, #D7DBD8 1px, transparent 1px),
+      linear-gradient(to right, #D7DBD8 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F6F7F5;
+  border-left: 1px solid #D7DBD8;
+  border-top: 1px solid #D7DBD8;
+}
+::-webkit-scrollbar-thumb {
+  background: #15191C;
+  border-radius: 0px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4A5359;
+}
+
+/* Canvas styling */
+.canvas-port {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1E5C8C;
+  border: 1px solid #15191C;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  z-index: 40;
+  cursor: crosshair;
+  opacity: 0;
+  pointer-events: auto;
+}
+
+/* Invisible hit area to make ports easy to click and drop onto */
+.canvas-port::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  cursor: crosshair;
+}
+
+.canvas-port:hover {
+  opacity: 1;
+  transform: scale(1.2);
+  background: #00A8FF;
+  box-shadow: 0 0 0 3px rgba(0, 168, 255, 0.25);
+}
+
+/* Active magnetic lock state when line drags near port */
+.canvas-port.port-snapped {
+  opacity: 1;
+  transform: scale(1.4) !important;
+  background: #00A8FF !important;
+  box-shadow: 0 0 0 4px rgba(0, 168, 255, 0.35) !important;
+  z-index: 45;
+}
+
+/* Specific port positions for all shapes */
+.port-top {
+  top: -20px;
+  left: calc(50% - 7px);
+}
+.port-bottom {
+  bottom: -20px;
+  left: calc(50% - 7px);
+}
+.port-left {
+  left: -20px;
+  top: calc(50% - 7px);
+}
+.port-right {
+  right: -20px;
+  top: calc(50% - 7px);
+}
+
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #FFFFFF;
+  border: 1.5px solid #1E5C8C;
+  z-index: 30;
+  pointer-events: auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+.resize-handle:hover {
+  background: #1E5C8C;
+  border-color: #1E5C8C;
+}
+.resize-handle.handle-nw {
+  top: -4px;
+  left: -4px;
+  cursor: nw-resize;
+}
+.resize-handle.handle-n {
+  top: -4px;
+  left: calc(50% - 4px);
+  cursor: n-resize;
+}
+.resize-handle.handle-ne {
+  top: -4px;
+  right: -4px;
+  cursor: ne-resize;
+}
+.resize-handle.handle-e {
+  top: calc(50% - 4px);
+  right: -4px;
+  cursor: e-resize;
+}
+.resize-handle.handle-se {
+  bottom: -4px;
+  right: -4px;
+  cursor: se-resize;
+}
+.resize-handle.handle-s {
+  bottom: -4px;
+  left: calc(50% - 4px);
+  cursor: s-resize;
+}
+.resize-handle.handle-sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: sw-resize;
+}
+.resize-handle.handle-w {
+  top: calc(50% - 4px);
+  left: -4px;
+  cursor: w-resize;
+}
+

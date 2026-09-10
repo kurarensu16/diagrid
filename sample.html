@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Diagrid</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --ink: #15191C;
+            --ink-soft: #4A5359;
+            --paper: #F6F7F5;
+            --paper-raised: #FFFFFF;
+            --line: #D7DBD8;
+            --blueprint: #1E5C8C;
+            --signal: #D45B33;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--paper);
+            color: var(--ink);
+            font-family: 'Space Grotesk', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 22px 48px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .logo {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-mark {
+            width: 16px;
+            height: 16px;
+            border: 1.5px solid var(--ink);
+            position: relative;
+        }
+
+        .logo-mark::before,
+        .logo-mark::after {
+            content: '';
+            position: absolute;
+            background: var(--ink);
+        }
+
+        .logo-mark::before {
+            width: 1.5px;
+            height: 100%;
+            left: 50%;
+        }
+
+        .logo-mark::after {
+            height: 1.5px;
+            width: 100%;
+            top: 50%;
+        }
+
+        nav .links {
+            display: flex;
+            gap: 32px;
+            font-size: 14px;
+            color: var(--ink-soft);
+        }
+
+        nav .cta {
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            border: 1px solid var(--ink);
+            padding: 8px 16px;
+            color: var(--ink);
+            text-decoration: none;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .hero-text {
+            padding: 80px 56px;
+            border-right: 1px solid var(--line);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .eyebrow {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--blueprint);
+            letter-spacing: 0.05em;
+            margin-bottom: 18px;
+        }
+
+        .eyebrow::before {
+            content: '// ';
+            color: var(--line);
+        }
+
+        h1 {
+            font-size: 46px;
+            line-height: 1.08;
+            letter-spacing: -0.02em;
+            font-weight: 700;
+            margin-bottom: 22px;
+        }
+
+        h1 em {
+            font-style: normal;
+            color: var(--blueprint);
+        }
+
+        .sub {
+            font-size: 16px;
+            color: var(--ink-soft);
+            line-height: 1.6;
+            max-width: 420px;
+            margin-bottom: 32px;
+        }
+
+        .hero-ctas {
+            display: flex;
+            gap: 14px;
+        }
+
+        .btn-primary {
+            background: var(--ink);
+            color: var(--paper);
+            border: 1px solid var(--ink);
+            padding: 13px 22px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            text-decoration: none;
+        }
+
+        .btn-secondary {
+            color: var(--ink);
+            border: 1px solid var(--line);
+            padding: 13px 22px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            text-decoration: none;
+        }
+
+        .hero-demo {
+            background: var(--paper-raised);
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .demo-tabs {
+            display: flex;
+            gap: 0;
+            border: 1px solid var(--line);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+
+        .demo-tab {
+            padding: 8px 14px;
+            color: var(--ink-soft);
+            border-right: 1px solid var(--line);
+        }
+
+        .demo-tab.active {
+            background: var(--ink);
+            color: var(--paper);
+        }
+
+        .code-pane {
+            background: var(--ink);
+            color: #C9D1D9;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12.5px;
+            padding: 20px;
+            line-height: 1.8;
+            flex: 1;
+        }
+
+        .code-pane .k {
+            color: #7EB6D9;
+        }
+
+        .code-pane .s {
+            color: #D9A05B;
+        }
+
+        .code-pane .c {
+            color: #6B7680;
+        }
+
+        .diagram-pane {
+            border: 1px solid var(--line);
+            flex: 1;
+            padding: 24px;
+            position: relative;
+            min-height: 220px;
+            background:
+                linear-gradient(var(--line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--line) 1px, transparent 1px);
+            background-size: 20px 20px;
+            background-color: var(--paper-raised);
+        }
+
+        .node {
+            position: absolute;
+            background: var(--paper-raised);
+            border: 1.5px solid var(--ink);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            padding: 8px 12px;
+            box-shadow: 3px 3px 0 var(--blueprint);
+        }
+
+        .node.n1 {
+            top: 24px;
+            left: 24px;
+        }
+
+        .node.n2 {
+            top: 110px;
+            left: 200px;
+        }
+
+        .node.n3 {
+            top: 24px;
+            left: 320px;
+            border-color: var(--signal);
+            box-shadow: 3px 3px 0 var(--signal);
+        }
+
+        .edge {
+            position: absolute;
+            border-top: 1.5px solid var(--ink-soft);
+            transform-origin: left center;
+        }
+
+        section.strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .strip-item {
+            padding: 36px 28px;
+            border-right: 1px solid var(--line);
+        }
+
+        .strip-item:last-child {
+            border-right: none;
+        }
+
+        .strip-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--blueprint);
+            margin-bottom: 10px;
+        }
+
+        .strip-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .strip-desc {
+            font-size: 13.5px;
+            color: var(--ink-soft);
+            line-height: 1.5;
+        }
+
+        footer {
+            padding: 28px 48px;
+            display: flex;
+            justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--ink-soft);
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <div class="logo"><span class="logo-mark"></span>diagrid</div>
+        <div class="links">
+            <span>Templates</span><span>Docs</span><span>Pricing</span>
+        </div>
+        <a class="cta" href="#">sign_in()</a>
+    </nav>
+
+    <div class="hero">
+        <div class="hero-text">
+            <div class="eyebrow">text-to-diagram editor</div>
+            <h1>Write the <em>structure</em>.<br>Get the diagram.</h1>
+            <p class="sub">ERDs, flowcharts, sequence diagrams, and more — typed as plain text, rendered live. Built for
+                freelancers and small teams who need clean technical docs fast, not another bloated whiteboard.</p>
+            <div class="hero-ctas">
+                <a class="btn-primary" href="#">start_diagram →</a>
+                <a class="btn-secondary" href="#">view_templates</a>
+            </div>
+        </div>
+        <div class="hero-demo">
+            <div class="demo-tabs">
+                <div class="demo-tab active">erd.diagrid</div>
+                <div class="demo-tab">preview</div>
+            </div>
+            <div class="code-pane">
+                <span class="c">// users.erd</span><br>
+                <span class="k">entity</span> users {<br>
+                &nbsp;&nbsp;id <span class="s">uuid</span> pk<br>
+                &nbsp;&nbsp;email <span class="s">text</span><br>
+                }<br><br>
+                <span class="k">entity</span> projects {<br>
+                &nbsp;&nbsp;id <span class="s">uuid</span> pk<br>
+                &nbsp;&nbsp;user_id <span class="s">uuid</span> fk<br>
+                }<br><br>
+                users ||--o{ projects
+            </div>
+            <div class="diagram-pane">
+                <div class="node n1">users</div>
+                <div class="node n2">projects</div>
+                <div class="node n3">diagrams</div>
+            </div>
+        </div>
+    </div>
+
+    <section class="strip">
+        <div class="strip-item">
+            <div class="strip-label">01 / types</div>
+            <div class="strip-title">Beyond the basics</div>
+            <div class="strip-desc">ERD, flowchart, sequence, and class diagrams today — DFD, use case, and activity
+                diagrams next, with no separate tool required.</div>
+        </div>
+        <div class="strip-item">
+            <div class="strip-label">02 / speed</div>
+            <div class="strip-title">Type, don't drag</div>
+            <div class="strip-desc">Plain-text syntax renders live as you write. No box-dragging, no alignment
+                guesswork.</div>
+        </div>
+        <div class="strip-item">
+            <div class="strip-label">03 / export</div>
+            <div class="strip-title">Docs-ready output</div>
+            <div class="strip-desc">PNG and SVG export sized for embedding straight into specs, READMEs, and client
+                deliverables.</div>
+        </div>
+        <div class="strip-item">
+            <div class="strip-label">04 / built for</div>
+            <div class="strip-title">Solo devs &amp; small teams</div>
+            <div class="strip-desc">No seat limits to fight over, no enterprise sales call. Just a fast, lean tool that
+                gets out of your way.</div>
+        </div>
+    </section>
+
+    <footer>
+        <span>diagrid — build_v0.1</span>
+        <span>made for people who'd rather type than drag</span>
+    </footer>
+
+</body>
+
+</html>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="6" fill="#15191C"/>
+  <!-- Left bracket [ -->
+  <path d="M8 8h3v2.5H10.5v11H11V24H8V8z" fill="#FFFFFF"/>
+  <!-- Plus symbol + -->
+  <path d="M14.5 14.5V10h3v4.5H22v3h-4.5V22h-3v-4.5H10v-3h4.5z" fill="#FFFFFF"/>
+  <!-- Right bracket ] -->
+  <path d="M24 8h-3v2.5h.5v11H21V24h3V8z" fill="#FFFFFF"/>
+</svg>
