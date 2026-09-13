@@ -11,6 +11,8 @@ import { Settings } from './pages/Settings';
 import { Docs } from './pages/Docs';
 import { PublicViewer } from './pages/PublicViewer';
 import { EmbedWidget } from './pages/EmbedWidget';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import { TermsOfService } from './pages/TermsOfService';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
 import { ServerError } from './pages/ServerError';
@@ -229,6 +231,8 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
 
           {/* Public Read-Only Blueprint Viewer & Embed Routes */}
           <Route path="/view/:id" element={<PublicViewer />} />

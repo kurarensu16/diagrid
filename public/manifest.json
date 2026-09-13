@@ -1,0 +1,18 @@
+{
+  "short_name": "Diagrid",
+  "name": "Diagrid — Developer Diagramming & Blueprint Studio",
+  "description": "Write structure, get diagrams. Fast flowcharting, ERDs, sequence diagrams, and architecture blueprints with zero bloat.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0B1528",
+  "theme_color": "#0052FF",
+  "display": "standalone",
+  "orientation": "any",
+  "categories": ["developer", "productivity", "utilities"]
+}

@@ -6,6 +6,7 @@ import { diagramService } from '../services/diagramService';
 import { ExportModal } from '../components/canvas/ExportModal';
 import { ShareModal } from '../components/canvas/ShareModal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { FeedbackModal } from '../components/ui/FeedbackModal';
 import { useCurrentUser } from '../services/mockAuth';
 import { authService } from '../services/authService';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
@@ -13,6 +14,7 @@ import {
   ArrowLeft, 
   Download, 
   Share2,
+  MessageSquare,
   ZoomIn, 
   ZoomOut, 
   Check, 
@@ -656,9 +658,10 @@ export const Editor: React.FC = () => {
   // Save status
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
 
-  // Export & Share suite modals
+  // Export & Share & Feedback suite modals
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   // History Undo/Redo States
   const [historyState, setHistoryState] = useState<{
@@ -2637,6 +2640,17 @@ export const Editor: React.FC = () => {
             <Download className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Export</span>
           </Button>
+
+          {/* Feedback & Diagnostics Trigger */}
+          <button
+            type="button"
+            onClick={() => setIsFeedbackOpen(true)}
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 border border-line hover:border-ink bg-paper text-[11px] text-ink-soft hover:text-ink transition-colors cursor-pointer"
+            title="Submit Feedback or Report an Issue"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-blueprint" />
+            <span>Feedback</span>
+          </button>
 
           {/* Properties Inspector Toggle */}
           <button
@@ -5733,6 +5747,20 @@ export const Editor: React.FC = () => {
         description={`This will erase all ${nodes.length} node(s), ${edges.length} connector(s), and freehand drawings from the active drafting sheet.`}
         confirmText="Clear Canvas"
         danger={true}
+      />
+
+      {/* Feedback & Diagnostics Modal */}
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+        diagramContext={{
+          id: diagram?.id,
+          type: diagram?.type,
+          title: diagram?.title,
+          nodeCount: nodes.length,
+          edgeCount: edges.length,
+          zoom
+        }}
       />
     </div>
   );

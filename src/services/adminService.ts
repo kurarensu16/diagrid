@@ -74,6 +74,11 @@ export interface AdminFeedback {
   rating: number; // 1 to 5
   ratingLabel: string;
   message: string;
+  pageUrl?: string;
+  clientMetadata?: Record<string, any>;
+  attachmentUrl?: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  adminNotes?: string;
   status: 'new' | 'reviewed' | 'resolved';
 }
 
@@ -530,6 +535,11 @@ export const adminService = {
         rating: item.rating || 5,
         ratingLabel: item.rating_label || 'Satisfied',
         message: item.message,
+        pageUrl: item.page_url || undefined,
+        clientMetadata: item.client_metadata || undefined,
+        attachmentUrl: item.attachment_url || undefined,
+        priority: (item.priority as 'low' | 'medium' | 'high' | 'critical') || 'medium',
+        adminNotes: item.admin_notes || '',
         status: (item.status as 'new' | 'reviewed' | 'resolved') || 'new',
       }));
     } catch {
@@ -545,6 +555,7 @@ export const adminService = {
     averageRating: number;
     byType: { feature: number; bug: number; general: number };
     byStatus: { new: number; reviewed: number; resolved: number };
+    byPriority: { critical: number; high: number; medium: number; low: number };
   } => {
     if (list.length === 0) {
       return {
@@ -552,6 +563,7 @@ export const adminService = {
         averageRating: 5.0,
         byType: { feature: 0, bug: 0, general: 0 },
         byStatus: { new: 0, reviewed: 0, resolved: 0 },
+        byPriority: { critical: 0, high: 0, medium: 0, low: 0 },
       };
     }
 
@@ -571,11 +583,52 @@ export const adminService = {
       resolved: list.filter((i) => i.status === 'resolved').length,
     };
 
-    return { total, averageRating, byType, byStatus };
+    const byPriority = {
+      critical: list.filter((i) => i.priority === 'critical').length,
+      high: list.filter((i) => i.priority === 'high').length,
+      medium: list.filter((i) => i.priority === 'medium').length,
+      low: list.filter((i) => i.priority === 'low').length,
+    };
+
+    return { total, averageRating, byType, byStatus, byPriority };
   },
 
   /**
-   * Submits user feedback directly to Supabase.
+   * Uploads an image attachment for feedback (e.g. screenshot).
+   */
+  uploadFeedbackAttachment: async (file: File | Blob): Promise<{ url?: string; error?: string }> => {
+    if (!isSupabaseConfigured()) {
+      return { error: 'Supabase is not configured' };
+    }
+
+    try {
+      const fileExt = file instanceof File ? file.name.split('.').pop() || 'png' : 'png';
+      const fileName = `feedback_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+      const filePath = `screenshots/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('feedback-attachments')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type || 'image/png'
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('feedback-attachments')
+        .getPublicUrl(filePath);
+
+      return { url: publicUrlData.publicUrl };
+    } catch (err: any) {
+      console.error('[adminService] uploadFeedbackAttachment error:', err.message);
+      return { error: err.message || 'Failed to upload screenshot attachment' };
+    }
+  },
+
+  /**
+   * Submits user feedback directly to Supabase with rich diagnostics.
    */
   submitFeedback: async (feedback: {
     userEmail: string;
@@ -583,6 +636,10 @@ export const adminService = {
     rating: number;
     ratingLabel?: string;
     message: string;
+    pageUrl?: string;
+    clientMetadata?: Record<string, any>;
+    attachmentUrl?: string;
+    priority?: 'low' | 'medium' | 'high' | 'critical';
   }): Promise<{ error?: string }> => {
     if (!isSupabaseConfigured()) {
       return { error: 'Supabase is not configured' };
@@ -597,6 +654,11 @@ export const adminService = {
         rating: feedback.rating,
         rating_label: feedback.ratingLabel || 'Satisfied',
         message: feedback.message.trim(),
+        page_url: feedback.pageUrl || (typeof window !== 'undefined' ? window.location.pathname + window.location.search : null),
+        client_metadata: feedback.clientMetadata || {},
+        attachment_url: feedback.attachmentUrl || null,
+        priority: feedback.priority || (feedback.type === 'bug' && feedback.rating <= 2 ? 'high' : 'medium'),
+        admin_notes: '',
         status: 'new',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -639,6 +701,56 @@ export const adminService = {
     } catch (err: any) {
       console.error('[adminService] updateFeedbackStatus error:', err.message);
       return { error: err.message || 'Failed to update feedback status' };
+    }
+  },
+
+  /**
+   * Updates feedback priority in Supabase.
+   */
+  updateFeedbackPriority: async (
+    id: string,
+    priority: 'low' | 'medium' | 'high' | 'critical'
+  ): Promise<{ error?: string }> => {
+    if (!isSupabaseConfigured()) {
+      return { error: 'Supabase is not configured' };
+    }
+
+    try {
+      const { error } = await supabase
+        .from('feedback')
+        .update({ priority, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) throw error;
+      return {};
+    } catch (err: any) {
+      console.error('[adminService] updateFeedbackPriority error:', err.message);
+      return { error: err.message || 'Failed to update feedback priority' };
+    }
+  },
+
+  /**
+   * Updates internal admin engineering notes in Supabase.
+   */
+  updateFeedbackAdminNotes: async (
+    id: string,
+    adminNotes: string
+  ): Promise<{ error?: string }> => {
+    if (!isSupabaseConfigured()) {
+      return { error: 'Supabase is not configured' };
+    }
+
+    try {
+      const { error } = await supabase
+        .from('feedback')
+        .update({ admin_notes: adminNotes, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) throw error;
+      return {};
+    } catch (err: any) {
+      console.error('[adminService] updateFeedbackAdminNotes error:', err.message);
+      return { error: err.message || 'Failed to save admin notes' };
     }
   },
 

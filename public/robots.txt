@@ -1,0 +1,20 @@
+# robots.txt for Diagrid (https://diagrid.dev)
+User-agent: *
+Allow: /
+Allow: /docs
+Allow: /templates
+Allow: /privacy
+Allow: /terms
+Allow: /view/
+Allow: /share/
+
+# Disallow private user workspaces and admin portals
+Disallow: /dashboard
+Disallow: /editor/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /settings
+Disallow: /project/
+
+# Sitemaps
+Sitemap: https://diagrid.dev/sitemap.xml
