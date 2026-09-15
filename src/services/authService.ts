@@ -62,7 +62,16 @@ let pendingProfilePromise: Promise<AuthUser> | null = null;
 /**
  * Fetches user profile from public.profiles table or builds fallback from session metadata.
  */
-const fetchProfile = async (userId: string, email: string): Promise<AuthUser> => {
+const getProviderAvatarUrl = (userMetadata?: Record<string, unknown>): string | undefined => {
+  const avatarUrl = userMetadata?.avatar_url || userMetadata?.picture;
+  return typeof avatarUrl === 'string' && avatarUrl.trim() ? avatarUrl.trim() : undefined;
+};
+
+const fetchProfile = async (
+  userId: string,
+  email: string,
+  userMetadata?: Record<string, unknown>,
+): Promise<AuthUser> => {
   if (pendingProfilePromise) {
     return pendingProfilePromise;
   }
@@ -94,13 +103,27 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
 
       const resolvedRole: 'user' | 'admin' = profile.role === 'admin' ? 'admin' : 'user';
 
+      const providerAvatarUrl = getProviderAvatarUrl(userMetadata);
+      const shouldUseProviderAvatar = !profile.avatar_url && !!providerAvatarUrl;
+
+      if (shouldUseProviderAvatar) {
+        const { error: avatarSyncError } = await supabase
+          .from('profiles')
+          .update({ avatar_url: providerAvatarUrl, avatar_type: 'custom' })
+          .eq('id', userId);
+
+        if (avatarSyncError) {
+          console.warn('[authService] Failed to sync OAuth avatar:', avatarSyncError.message);
+        }
+      }
+
       const resolvedUser: AuthUser = {
         id: profile.id,
         email: profile.email || email,
         role: resolvedRole,
         name: profile.name || email.split('@')[0],
-        avatar: profile.avatar_url,
-        avatarType: profile.avatar_type || 'preset',
+        avatar: profile.avatar_url || providerAvatarUrl,
+        avatarType: shouldUseProviderAvatar ? 'custom' : (profile.avatar_type || 'preset'),
         presetAvatar: resolvedRole === 'admin' && (!profile.preset_avatar || profile.preset_avatar === 'terminal') ? 'shield' : (profile.preset_avatar || 'terminal'),
         bio: profile.bio,
         theme: profile.theme || cachedUser?.theme || themeService.getTheme() || 'blueprint',
@@ -152,7 +175,7 @@ export const authService = {
         setCachedUser(null);
         return null;
       }
-      const user = await fetchProfile(session.user.id, session.user.email || '');
+      const user = await fetchProfile(session.user.id, session.user.email || '', session.user.user_metadata);
       setCachedUser(user);
       return user;
     } catch {
@@ -353,7 +376,7 @@ export const authService = {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const user = await fetchProfile(session.user.id, session.user.email || '');
+        const user = await fetchProfile(session.user.id, session.user.email || '', session.user.user_metadata);
         setCachedUser(user);
         callback(user);
       } else {
