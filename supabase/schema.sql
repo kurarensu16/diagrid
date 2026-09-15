@@ -114,6 +114,7 @@ security definer set search_path = public
 as $$
 declare
   default_name text;
+  provider_avatar_url text;
 begin
   -- 1. Derive default name from raw_user_meta_data or email prefix
   if new.raw_user_meta_data is not null and (new.raw_user_meta_data->>'name') is not null then
@@ -124,6 +125,11 @@ begin
     default_name := 'User';
   end if;
 
+  provider_avatar_url := coalesce(
+    new.raw_user_meta_data->>'avatar_url',
+    new.raw_user_meta_data->>'picture'
+  );
+
   -- New accounts always start as users. Promotion requires an admin operation.
   insert into public.profiles (
     id,
@@ -131,19 +137,23 @@ begin
     name,
     role,
     avatar_type,
-    preset_avatar
+    preset_avatar,
+    avatar_url
   ) values (
     new.id,
     coalesce(new.email, ''),
     default_name,
     'user'::public.user_role,
-    'preset'::public.avatar_type,
-    'terminal'
+    case when provider_avatar_url is not null then 'custom'::public.avatar_type else 'preset'::public.avatar_type end,
+    'terminal',
+    provider_avatar_url
   )
   on conflict (id) do update
   set 
     email = excluded.email,
     name = coalesce(public.profiles.name, excluded.name),
+    avatar_url = coalesce(public.profiles.avatar_url, excluded.avatar_url),
+    avatar_type = case when public.profiles.avatar_url is null and excluded.avatar_url is not null then 'custom'::public.avatar_type else public.profiles.avatar_type end,
     role = public.profiles.role;
 
   return new;
