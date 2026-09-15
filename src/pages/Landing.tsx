@@ -20,7 +20,6 @@ import {
   X, 
   Sliders, 
   ExternalLink,
-  ShieldAlert,
   Code,
   MessageSquare,
   MousePointer,
@@ -1353,10 +1352,12 @@ export const Landing: React.FC = () => {
           <span>Made for people who want neat diagrams without the hassle.</span>
         </div>
 
-        <div className="flex items-center gap-6 text-[12px]">
+        <div className="flex flex-wrap items-center gap-6 text-[12px]">
           <a href="#diagrams" className="hover:text-white transition-colors">Diagrams</a>
           <Link to="/templates" className="hover:text-white transition-colors">Templates</Link>
           <Link to="/docs" className="hover:text-white transition-colors">Help & Docs</Link>
+          <Link to="/privacy" className="hover:text-white transition-colors">Privacy</Link>
+          <Link to="/terms" className="hover:text-white transition-colors">Terms</Link>
           <button
             onClick={() => setIsFeedbackOpen(true)}
             className="hover:text-white transition-colors text-[#9AA5A0] flex items-center gap-1.5 cursor-pointer bg-transparent border-none p-0 font-mono text-[12px]"
@@ -1376,10 +1377,6 @@ export const Landing: React.FC = () => {
             </svg>
             GitHub
           </a>
-          <Link to="/admin" className="hover:text-white transition-colors text-signal flex items-center gap-1 font-bold">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            Admin Console
-          </Link>
         </div>
       </footer>
 

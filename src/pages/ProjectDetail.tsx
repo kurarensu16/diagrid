@@ -9,16 +9,23 @@ import { Plus, Search, Trash2, Copy, FileText, ChevronRight, Calendar, ArrowLeft
 import { TemplateThumbnail } from '../components/ui/TemplateThumbnail';
 import { ProjectSettingsModal } from '../components/project/ProjectSettingsModal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { authService } from '../services/authService';
+import { cloudSaveStatus } from '../services/cloudSaveStatus';
+import { offlineSyncService } from '../services/offlineSyncService';
 
 type DiagramSortOption = 'updated_desc' | 'updated_asc' | 'title_asc' | 'title_desc' | 'type_asc' | 'nodes_desc';
 
 export const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const userId = authService.getUserSync()?.id;
 
   const [project, setProject] = useState<Project | null>(null);
   const [diagrams, setDiagrams] = useState<Diagram[]>([]);
   const [isLoadingDiagrams, setIsLoadingDiagrams] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<DiagramSortOption>('updated_desc');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -75,13 +82,32 @@ export const ProjectDetail: React.FC = () => {
     }
   }, [id, navigate]);
 
+  useEffect(() => {
+    const onSync = () => { if (id) void loadDiagrams(id); };
+    window.addEventListener('diagrid:sync-complete', onSync);
+    return () => window.removeEventListener('diagrid:sync-complete', onSync);
+  }, [id]);
+
   const loadDiagrams = async (projId: string) => {
     setIsLoadingDiagrams(true);
     try {
       const data = await diagramService.getDiagrams(projId);
       setDiagrams(data);
+      const userId = authService.getUserSync()?.id;
+      setPendingCount(userId ? cloudSaveStatus.pendingDiagramIds(userId).filter(diagramId => mockDb.getDiagram(diagramId)?.project_id === projId).length + cloudSaveStatus.pendingDiagramDeletionIds(userId, projId).length + Number(cloudSaveStatus.isProjectPending(userId, projId)) : 0);
     } finally {
       setIsLoadingDiagrams(false);
+    }
+  };
+
+  const handleRetrySync = async () => {
+    if (!id) return;
+    setIsSyncing(true);
+    try {
+      await offlineSyncService.syncPending();
+      await loadDiagrams(id);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -90,11 +116,14 @@ export const ProjectDetail: React.FC = () => {
     if (!id || !diagramTitle.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setActionError('');
     try {
       const newDiag = await diagramService.createDiagram(id, diagramTitle, diagramType);
       setDiagramTitle('');
       setIsCreateModalOpen(false);
       navigate(`/editor/${newDiag.id}`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not create the diagram. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -102,6 +131,7 @@ export const ProjectDetail: React.FC = () => {
 
   const handleOpenRenameModal = (e: React.MouseEvent, diag: Diagram) => {
     e.stopPropagation();
+    setActionError('');
     setEditingDiagramId(diag.id);
     setEditingDiagramTitle(diag.title);
     setIsRenameModalOpen(true);
@@ -112,16 +142,20 @@ export const ProjectDetail: React.FC = () => {
     if (!editingDiagramId || !editingDiagramTitle.trim() || isRenaming) return;
 
     setIsRenaming(true);
+    setActionError('');
     try {
-      await diagramService.updateDiagramMetadata(editingDiagramId, {
+      const updated = await diagramService.updateDiagramMetadata(editingDiagramId, {
         title: editingDiagramTitle.trim()
       });
+      if (!updated) throw new Error('Could not save this name. Please try again.');
       setDiagrams(prev => prev.map(d => 
         d.id === editingDiagramId ? { ...d, title: editingDiagramTitle.trim(), updated_at: new Date().toISOString() } : d
       ));
       setIsRenameModalOpen(false);
       setEditingDiagramId('');
       setEditingDiagramTitle('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not save this name. Please try again.');
     } finally {
       setIsRenaming(false);
     }
@@ -129,21 +163,31 @@ export const ProjectDetail: React.FC = () => {
 
   const handleDeleteDiagramConfirm = async () => {
     if (!diagramToDelete) return;
-    await diagramService.deleteDiagram(diagramToDelete.id);
+    if (!await diagramService.deleteDiagram(diagramToDelete.id)) {
+      throw new Error('Could not safely delete this diagram. Please try again.');
+    }
     setDiagramToDelete(null);
     if (id) loadDiagrams(id);
   };
 
   const handleDeleteProjectConfirm = async () => {
     if (!id) return;
-    await projectService.deleteProject(id);
+    if (!await projectService.deleteProject(id)) {
+      throw new Error('Could not safely delete this project. Please try again.');
+    }
     navigate('/dashboard');
   };
 
   const handleDuplicateDiagram = async (e: React.MouseEvent, diagId: string) => {
     e.stopPropagation();
-    await diagramService.duplicateDiagram(diagId);
-    if (id) loadDiagrams(id);
+    setActionError('');
+    try {
+      const duplicate = await diagramService.duplicateDiagram(diagId);
+      if (!duplicate) throw new Error('Could not duplicate this diagram. Please try again.');
+      if (id) await loadDiagrams(id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not duplicate this diagram. Please try again.');
+    }
   };
 
   const filteredDiagrams = useMemo(() => {
@@ -195,6 +239,7 @@ export const ProjectDetail: React.FC = () => {
 
   return (
     <div className="p-8 flex flex-col gap-6 text-ink">
+      {actionError && !isCreateModalOpen && !isRenameModalOpen && <p role="alert" className="border border-signal bg-signal/5 px-4 py-3 text-[12px] text-signal font-mono">{actionError}</p>}
       {/* Breadcrumb row */}
       <div className="flex items-center gap-2 font-mono text-[12px] text-ink-soft select-none mb-1">
         <Link to="/dashboard" className="hover:text-ink transition-colors">projects</Link>
@@ -275,12 +320,21 @@ export const ProjectDetail: React.FC = () => {
             settings
           </Button>
 
-          <Button onClick={() => setIsCreateModalOpen(true)} className="flex items-center gap-1.5 shrink-0">
+          <Button onClick={() => { setActionError(''); setIsCreateModalOpen(true); }} className="flex items-center gap-1.5 shrink-0">
             <Plus className="w-4 h-4" />
             create_diagram()
           </Button>
         </div>
       </div>
+
+      {pendingCount > 0 && (
+        <div role="status" className="border border-blueprint bg-blueprint/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink">
+          <span>{pendingCount} {pendingCount === 1 ? 'change is' : 'changes are'} saved on this device and waiting to sync to your account.</span>
+          <button type="button" onClick={handleRetrySync} disabled={isSyncing} className="font-mono font-bold text-blueprint underline disabled:opacity-50 cursor-pointer">
+            {isSyncing ? 'Syncing…' : 'Retry sync'}
+          </button>
+        </div>
+      )}
 
       {/* Diagrams layout */}
       {isLoadingDiagrams ? (
@@ -370,6 +424,9 @@ export const ProjectDetail: React.FC = () => {
                   <h3 className="text-[17px] font-bold tracking-tight text-ink group-hover:text-blueprint transition-colors mt-2 line-clamp-1">
                     {diag.title}
                   </h3>
+                  {userId && cloudSaveStatus.isPending(userId, diag.id) && (
+                    <span className="inline-block mt-2 text-[10px] font-mono text-blueprint border border-blueprint px-1.5 py-0.5">On this device</span>
+                  )}
                 </div>
 
                 {/* Timestamp footer */}
@@ -414,6 +471,7 @@ export const ProjectDetail: React.FC = () => {
               </div>
 
               <form onSubmit={handleCreateDiagram} className="flex flex-col gap-5">
+                {actionError && <p role="alert" className="text-[12px] text-signal font-mono">{actionError}</p>}
                 {/* Diagram Title */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
@@ -611,6 +669,7 @@ export const ProjectDetail: React.FC = () => {
               </div>
 
               <form onSubmit={handleRenameDiagram} className="flex flex-col gap-4">
+                {actionError && <p role="alert" className="text-[12px] text-signal font-mono">{actionError}</p>}
                 <div className="flex flex-col gap-1.5">
                   <label className="font-mono text-[11px] font-bold text-ink-soft uppercase">
                     Diagram Title

@@ -74,7 +74,7 @@ export const mockAuth = {
 
   login: (email: string): User => {
     authService.signIn(email).catch(() => {});
-    return authService.getUserSync() || { id: 'usr-default', email, role: email.includes('admin') ? 'admin' : 'user' };
+    return authService.getUserSync() || { id: 'usr-default', email, role: 'user' };
   },
 
   logout: (): void => {

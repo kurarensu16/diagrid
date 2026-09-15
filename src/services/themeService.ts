@@ -72,7 +72,7 @@ export const themeService = {
     themeService.applyCurrentRouteTheme(theme);
   },
 
-  applyCurrentRouteTheme: (userTheme?: ThemeMode): void => {
+  applyCurrentRouteTheme: (userTheme?: ThemeMode, isSignedIn = false): void => {
     if (typeof window === 'undefined') return;
     const path = window.location.pathname;
     const isAppRoute = (
@@ -80,7 +80,8 @@ export const themeService = {
       path.startsWith('/project/') ||
       path.startsWith('/settings') ||
       path.startsWith('/editor/') ||
-      path.startsWith('/admin')
+      path.startsWith('/admin') ||
+      (path === '/templates' && isSignedIn)
     );
 
     if (isAppRoute) {

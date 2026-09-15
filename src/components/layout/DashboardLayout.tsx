@@ -7,6 +7,7 @@ import { Avatar } from '../ui/Avatar';
 import { Logo } from '../ui/Logo';
 import { FeedbackModal } from '../ui/FeedbackModal';
 import { SupportModal } from '../ui/SupportModal';
+import { offlineSyncService } from '../../services/offlineSyncService';
 
 export const DashboardLayout: React.FC = () => {
   const location = useLocation();
@@ -14,7 +15,7 @@ export const DashboardLayout: React.FC = () => {
   const user = useCurrentUser();
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [isSupportEnabled, setIsSupportEnabled] = useState(true);
+  const [isSupportEnabled, setIsSupportEnabled] = useState(false);
   const [githubUrl, setGithubUrl] = useState('https://github.com/kurarensu16/diagrid');
 
   useEffect(() => {
@@ -22,6 +23,12 @@ export const DashboardLayout: React.FC = () => {
       if (s.github_repo_url) setGithubUrl(s.github_repo_url);
       setIsSupportEnabled(s.creator_wallets_enabled !== false);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const retryWhenOnline = () => { void offlineSyncService.syncPending(); };
+    window.addEventListener('online', retryWhenOnline);
+    return () => window.removeEventListener('online', retryWhenOnline);
   }, []);
 
   const handleLogout = () => {
@@ -141,7 +148,7 @@ export const DashboardLayout: React.FC = () => {
               title="Send feedback or get support"
             >
               <HelpCircle className="w-4 h-4 text-blueprint shrink-0 group-hover:scale-105 transition-transform" />
-              <span className="group-hover:text-blueprint transition-colors font-medium">feedback_support()</span>
+              <span className="group-hover:text-blueprint transition-colors font-medium">Feedback & help</span>
             </button>
 
             {/* Admin-Managed GitHub Link */}
@@ -188,4 +195,3 @@ export const DashboardLayout: React.FC = () => {
     </div>
   );
 };
-

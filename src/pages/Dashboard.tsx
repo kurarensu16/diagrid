@@ -5,13 +5,20 @@ import { Button } from '../components/ui/Button';
 import { projectService, type ProjectWithStats } from '../services/projectService';
 import { Plus, Search, Trash2, Edit3, Folder, Calendar, RefreshCw, ArrowUpDown } from 'lucide-react';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { authService } from '../services/authService';
+import { cloudSaveStatus } from '../services/cloudSaveStatus';
+import { offlineSyncService } from '../services/offlineSyncService';
 
 type ProjectSortOption = 'updated_desc' | 'updated_asc' | 'name_asc' | 'name_desc' | 'diagrams_desc' | 'created_desc';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const userId = authService.getUserSync()?.id;
   const [projects, setProjects] = useState<ProjectWithStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<ProjectSortOption>('updated_desc');
   
@@ -30,6 +37,9 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     loadProjects();
+    const onSync = () => { void loadProjects(); };
+    window.addEventListener('diagrid:sync-complete', onSync);
+    return () => window.removeEventListener('diagrid:sync-complete', onSync);
   }, []);
 
   const loadProjects = async () => {
@@ -37,8 +47,20 @@ export const Dashboard: React.FC = () => {
     try {
       const data = await projectService.getProjects();
       setProjects(data);
+      const userId = authService.getUserSync()?.id;
+      setPendingCount(userId ? cloudSaveStatus.pendingProjectIds(userId).length + cloudSaveStatus.pendingDiagramIds(userId).length + cloudSaveStatus.pendingProjectDeletionIds(userId).length + cloudSaveStatus.pendingDiagramDeletionIds(userId).length : 0);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRetrySync = async () => {
+    setIsSyncing(true);
+    try {
+      await offlineSyncService.syncPending();
+      await loadProjects();
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -47,12 +69,15 @@ export const Dashboard: React.FC = () => {
     if (!projectName.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setActionError('');
     try {
       await projectService.createProject(projectName, projectDesc);
       setProjectName('');
       setProjectDesc('');
       setIsCreateModalOpen(false);
       await loadProjects();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not create the project. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -63,16 +88,20 @@ export const Dashboard: React.FC = () => {
     if (!editName.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setActionError('');
     try {
-      await projectService.updateProject(editingProjectId, {
+      const updated = await projectService.updateProject(editingProjectId, {
         name: editName,
         description: editDesc
       });
+      if (!updated) throw new Error('Could not save these changes. Please try again.');
       setEditingProjectId('');
       setEditName('');
       setEditDesc('');
       setIsEditModalOpen(false);
       await loadProjects();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not save these changes. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -80,13 +109,16 @@ export const Dashboard: React.FC = () => {
 
   const handleDeleteProjectConfirm = async () => {
     if (!projectToDelete) return;
-    await projectService.deleteProject(projectToDelete.id);
+    if (!await projectService.deleteProject(projectToDelete.id)) {
+      throw new Error('Could not safely delete this project. Please try again.');
+    }
     setProjectToDelete(null);
     await loadProjects();
   };
 
   const openEditModal = (e: React.MouseEvent, project: ProjectWithStats) => {
     e.stopPropagation();
+    setActionError('');
     setEditingProjectId(project.id);
     setEditName(project.name);
     setEditDesc(project.description);
@@ -159,12 +191,21 @@ export const Dashboard: React.FC = () => {
             </select>
           </div>
           
-          <Button onClick={() => setIsCreateModalOpen(true)} className="flex items-center gap-1.5 shrink-0">
+          <Button onClick={() => { setActionError(''); setIsCreateModalOpen(true); }} className="flex items-center gap-1.5 shrink-0">
             <Plus className="w-4 h-4" />
             create_project()
           </Button>
         </div>
       </div>
+
+      {pendingCount > 0 && (
+        <div role="status" className="border border-blueprint bg-blueprint/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink">
+          <span>{pendingCount} {pendingCount === 1 ? 'change is' : 'changes are'} saved on this device and waiting to sync to your account.</span>
+          <button type="button" onClick={handleRetrySync} disabled={isSyncing} className="font-mono font-bold text-blueprint underline disabled:opacity-50 cursor-pointer">
+            {isSyncing ? 'Syncing…' : 'Retry sync'}
+          </button>
+        </div>
+      )}
 
       {/* Projects Grid */}
       {isLoading ? (
@@ -197,6 +238,9 @@ export const Dashboard: React.FC = () => {
                     <h3 className="text-[18px] font-bold tracking-tight text-ink group-hover:text-blueprint transition-colors line-clamp-1">
                       {project.name}
                     </h3>
+                    {userId && cloudSaveStatus.isProjectPending(userId, project.id) && (
+                      <span className="shrink-0 text-[10px] font-mono text-blueprint border border-blueprint px-1.5 py-0.5">On this device</span>
+                    )}
                     {/* Actions */}
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -251,6 +295,7 @@ export const Dashboard: React.FC = () => {
               <p className="text-[12px] text-ink-soft font-mono mb-6">// initialize a new diagram directory</p>
               
               <form onSubmit={handleCreateProject} className="flex flex-col gap-4">
+                {actionError && <p role="alert" className="text-[12px] text-signal font-mono">{actionError}</p>}
                 <div className="flex flex-col gap-1">
                   <label className="font-mono text-[11px] text-ink-soft">PROJECT_NAME</label>
                   <input
@@ -296,6 +341,7 @@ export const Dashboard: React.FC = () => {
               <p className="text-[12px] text-ink-soft font-mono mb-6">// modify project directory properties</p>
               
               <form onSubmit={handleUpdateProject} className="flex flex-col gap-4">
+                {actionError && <p role="alert" className="text-[12px] text-signal font-mono">{actionError}</p>}
                 <div className="flex flex-col gap-1">
                   <label className="font-mono text-[11px] text-ink-soft">PROJECT_NAME</label>
                   <input

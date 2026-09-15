@@ -1,5 +1,6 @@
 import { type CanvasNode, type CanvasEdge, type Diagram } from '../services/mockDb';
 import { jsPDF } from 'jspdf';
+import { calculateEdgePath, getEdgeLabelPosition } from './edgeRouting';
 
 export interface FreehandDrawing {
   id: string;
@@ -464,24 +465,13 @@ export const generateStandaloneSvg = (
     if (options.edgePathGetter) {
       path = options.edgePathGetter(edge);
     } else {
-      // Fallback simple path
-      const srcDim = getNodeDimensions(srcNode);
-      const tgtDim = getNodeDimensions(tgtNode);
-      const startX = srcNode.x + srcDim.width / 2;
-      const startY = srcNode.y + srcDim.height;
-      const endX = tgtNode.x + tgtDim.width / 2;
-      const endY = tgtNode.y;
-      const midY = (startY + endY) / 2;
-      path = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+      path = calculateEdgePath(edge, nodes);
     }
 
     // Edge Label
     let labelSvg = '';
     if (edge.label) {
-      const srcDim = getNodeDimensions(srcNode);
-      const tgtDim = getNodeDimensions(tgtNode);
-      const labelX = Math.round((srcNode.x + srcDim.width / 2 + tgtNode.x + tgtDim.width / 2) / 2);
-      const labelY = Math.round((srcNode.y + srcDim.height / 2 + tgtNode.y + tgtDim.height / 2) / 2);
+      const { x: labelX, y: labelY } = getEdgeLabelPosition(path);
       const badgeWidth = edge.label.length * 7 + 16;
 
       labelSvg = `

@@ -95,9 +95,11 @@ create policy "Users can update their own profile"
 
 drop policy if exists "Admins can insert or delete profiles" on public.profiles;
 drop policy if exists "Enable insert for profiles" on public.profiles;
-create policy "Enable insert for profiles"
-  on public.profiles for insert
-  with check (true);
+
+-- The signup trigger owns inserts. Clients may update only non-privileged fields.
+revoke insert, update on public.profiles from anon, authenticated;
+grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme)
+  on public.profiles to authenticated;
 
 drop policy if exists "Admins can delete profiles" on public.profiles;
 create policy "Admins can delete profiles"
@@ -112,8 +114,6 @@ security definer set search_path = public
 as $$
 declare
   default_name text;
-  assigned_role public.user_role;
-  raw_role text;
 begin
   -- 1. Derive default name from raw_user_meta_data or email prefix
   if new.raw_user_meta_data is not null and (new.raw_user_meta_data->>'name') is not null then
@@ -124,23 +124,7 @@ begin
     default_name := 'User';
   end if;
 
-  -- 2. Determine role: any email containing 'admin' or 'superadmin' defaults to admin
-  if new.email is not null and (
-    new.email = 'admin@diagrid.dev' or 
-    lower(new.email) ilike '%admin%' or 
-    lower(new.email) ilike '%superadmin%'
-  ) then
-    assigned_role := 'admin'::public.user_role;
-  else
-    raw_role := case when new.raw_user_meta_data is not null then new.raw_user_meta_data->>'role' else null end;
-    if raw_role = 'admin' then
-      assigned_role := 'admin'::public.user_role;
-    else
-      assigned_role := 'user'::public.user_role;
-    end if;
-  end if;
-
-  -- 3. Insert profile record
+  -- New accounts always start as users. Promotion requires an admin operation.
   insert into public.profiles (
     id,
     email,
@@ -152,15 +136,15 @@ begin
     new.id,
     coalesce(new.email, ''),
     default_name,
-    assigned_role,
+    'user'::public.user_role,
     'preset'::public.avatar_type,
-    case when assigned_role = 'admin'::public.user_role then 'shield' else 'terminal' end
+    'terminal'
   )
   on conflict (id) do update
   set 
     email = excluded.email,
     name = coalesce(public.profiles.name, excluded.name),
-    role = case when public.profiles.role = 'admin'::public.user_role then 'admin'::public.user_role else excluded.role end;
+    role = public.profiles.role;
 
   return new;
 exception when others then
@@ -198,6 +182,10 @@ insert into storage.buckets (id, name, public)
 values ('thumbnails', 'thumbnails', true)
 on conflict (id) do nothing;
 
+insert into storage.buckets (id, name, public) 
+values ('feedback-attachments', 'feedback-attachments', true)
+on conflict (id) do nothing;
+
 -- Storage Policies
 drop policy if exists "Public view avatars" on storage.objects;
 create policy "Public view avatars"
@@ -222,6 +210,16 @@ create policy "Users upload thumbnails"
   on storage.objects for insert
   with check (bucket_id = 'thumbnails' and auth.uid() is not null);
 
+drop policy if exists "Public view feedback attachments" on storage.objects;
+create policy "Public view feedback attachments"
+  on storage.objects for select
+  using (bucket_id = 'feedback-attachments');
+
+drop policy if exists "Anyone upload feedback attachments" on storage.objects;
+create policy "Anyone upload feedback attachments"
+  on storage.objects for insert
+  with check (bucket_id = 'feedback-attachments');
+
 -- ==============================================================================
 -- 9. ADMIN PROMOTION UTILITY FUNCTION
 -- ==============================================================================
@@ -244,6 +242,8 @@ begin
   end if;
 end;
 $$ language plpgsql security definer;
+
+revoke execute on function public.promote_user_to_admin(text) from public, anon, authenticated;
 
 -- ==============================================================================
 -- 10. PROJECTS TABLE (Workspaces)
@@ -443,12 +443,18 @@ create table if not exists public.feedback (
   rating int not null default 5,
   rating_label text,
   message text not null,
+  page_url text,
+  client_metadata jsonb default '{}'::jsonb,
+  attachment_url text,
+  priority text not null default 'medium',
+  admin_notes text not null default '',
   status text not null default 'new',
   created_at timestamptz default timezone('utc'::text, now()) not null,
   updated_at timestamptz default timezone('utc'::text, now()) not null
 );
 
 create index if not exists idx_feedback_status on public.feedback(status);
+create index if not exists idx_feedback_priority on public.feedback(priority);
 create index if not exists idx_feedback_created_at on public.feedback(created_at desc);
 
 alter table public.feedback enable row level security;
@@ -660,47 +666,7 @@ create policy "Admins can delete/prune audit logs"
   using (public.is_admin());
 
 -- ==============================================================================
--- 16. USER FEEDBACK TABLE
--- ==============================================================================
-
-create table if not exists public.feedback (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references auth.users on delete set null,
-  user_email text not null,
-  type text not null,
-  rating int default 5 not null,
-  rating_label text default 'Satisfied' not null,
-  message text not null,
-  status text default 'new' not null,
-  created_at timestamptz default timezone('utc'::text, now()) not null,
-  updated_at timestamptz default timezone('utc'::text, now()) not null
-);
-
-create index if not exists idx_feedback_status on public.feedback(status);
-create index if not exists idx_feedback_type on public.feedback(type);
-create index if not exists idx_feedback_created_at on public.feedback(created_at desc);
-
--- Enable RLS
-alter table public.feedback enable row level security;
-
--- Feedback RLS
-drop policy if exists "Admins can view feedback" on public.feedback;
-create policy "Admins can view feedback"
-  on public.feedback for select
-  using (public.is_admin());
-
-drop policy if exists "Anyone can submit feedback" on public.feedback;
-create policy "Anyone can submit feedback"
-  on public.feedback for insert
-  with check (true);
-
-drop policy if exists "Admins can update feedback status" on public.feedback;
-create policy "Admins can update feedback status"
-  on public.feedback for update
-  using (public.is_admin());
-
--- ==============================================================================
--- 17. SYSTEM SETTINGS & PLATFORM GOVERNANCE TABLE
+-- 16. SYSTEM SETTINGS & PLATFORM GOVERNANCE TABLE
 -- ==============================================================================
 
 create table if not exists public.system_settings (
@@ -748,3 +714,29 @@ drop policy if exists "Admins can insert system settings" on public.system_setti
 create policy "Admins can insert system settings"
   on public.system_settings for insert
   with check (public.is_admin());
+
+-- ==============================================================================
+-- 17. STORAGE BUCKETS CONFIGURATION (Feedback Attachments & Screenshots)
+-- ==============================================================================
+
+-- Create public bucket for feedback screenshot attachments if storage schema is accessible
+insert into storage.buckets (id, name, public)
+values ('feedback-attachments', 'feedback-attachments', true)
+on conflict (id) do update set public = true;
+
+-- Storage bucket RLS policies for feedback-attachments
+drop policy if exists "Public Access for Feedback Attachments" on storage.objects;
+create policy "Public Access for Feedback Attachments"
+  on storage.objects for select
+  using (bucket_id = 'feedback-attachments');
+
+drop policy if exists "Anyone can upload feedback attachments" on storage.objects;
+create policy "Anyone can upload feedback attachments"
+  on storage.objects for insert
+  with check (bucket_id = 'feedback-attachments');
+
+drop policy if exists "Admins can manage feedback attachments" on storage.objects;
+create policy "Admins can manage feedback attachments"
+  on storage.objects for all
+  using (bucket_id = 'feedback-attachments' and public.is_admin());
+

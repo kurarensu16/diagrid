@@ -3,16 +3,20 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import type { Diagram, CanvasNode, CanvasEdge, EdgeMarkerType } from '../services/mockDb';
 import { diagramService } from '../services/diagramService';
+import { cloudSaveStatus } from '../services/cloudSaveStatus';
 import { ExportModal } from '../components/canvas/ExportModal';
 import { ShareModal } from '../components/canvas/ShareModal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { FeedbackModal } from '../components/ui/FeedbackModal';
 import { useCurrentUser } from '../services/mockAuth';
 import { authService } from '../services/authService';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
+import { calculateEdgePath, getEdgeLabelPosition, getPortCoords } from '../utils/edgeRouting';
 import { 
   ArrowLeft, 
   Download, 
   Share2,
+  MessageSquare,
   ZoomIn, 
   ZoomOut, 
   Check, 
@@ -50,7 +54,8 @@ import {
   Maximize2,
   Edit3,
   Grid,
-  Magnet
+  Magnet,
+  AlertTriangle
 } from 'lucide-react';
 
 interface FreehandDrawing {
@@ -654,11 +659,28 @@ export const Editor: React.FC = () => {
   const [alignmentGuides, setAlignmentGuides] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([]);
 
   // Save status
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
+  const [saveStatus, setSaveStatus] = useState<'ready' | 'saving' | 'cloud-saved' | 'local-only' | 'cloud-failed' | 'failed'>('ready');
+  const activeDiagramIdRef = useRef<string | null>(null);
+  const latestContentRef = useRef<string | null>(null);
+  const lastAttemptedContentRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef(false);
 
-  // Export & Share suite modals
+  useEffect(() => {
+    const onSync = () => {
+      const user = authService.getUserSync();
+      const diagramId = activeDiagramIdRef.current;
+      if (user && diagramId && !cloudSaveStatus.isPending(user.id, diagramId)) {
+        setSaveStatus(current => current === 'cloud-failed' ? 'cloud-saved' : current);
+      }
+    };
+    window.addEventListener('diagrid:sync-complete', onSync);
+    return () => window.removeEventListener('diagrid:sync-complete', onSync);
+  }, []);
+
+  // Export & Share & Feedback suite modals
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   // History Undo/Redo States
   const [historyState, setHistoryState] = useState<{
@@ -911,6 +933,41 @@ export const Editor: React.FC = () => {
     setSelectedEdgeId(null);
   }, [nodes]);
 
+  // Serialize saves so a slower earlier request cannot overwrite newer edits.
+  const flushSave = useCallback(async () => {
+    const diagramId = activeDiagramIdRef.current;
+    if (!diagramId || saveInFlightRef.current) return;
+
+    saveInFlightRef.current = true;
+    try {
+      while (activeDiagramIdRef.current === diagramId &&
+        latestContentRef.current !== null &&
+        latestContentRef.current !== lastAttemptedContentRef.current) {
+        const content = latestContentRef.current;
+        const result = await diagramService.saveDiagram(diagramId, content);
+        lastAttemptedContentRef.current = content;
+
+        if (activeDiagramIdRef.current !== diagramId) return;
+        if (content === latestContentRef.current) {
+          setSaveStatus(result.status);
+          if (result.status !== 'failed') {
+            setDiagram(prev => prev?.id === diagramId ? { ...prev, content } : prev);
+          }
+        } else {
+          setSaveStatus('saving');
+        }
+      }
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }, []);
+
+  const retrySave = () => {
+    lastAttemptedContentRef.current = null;
+    setSaveStatus('saving');
+    void flushSave();
+  };
+
   // Load Diagram
   useEffect(() => {
     if (id) {
@@ -918,6 +975,7 @@ export const Editor: React.FC = () => {
       diagramService.getDiagram(id).then((d) => {
         if (!isMounted) return;
         if (d) {
+          activeDiagramIdRef.current = d.id;
           setDiagram(d);
 
           // Align starter preset with diagram's template type
@@ -935,6 +993,13 @@ export const Editor: React.FC = () => {
             const initialNodes = parsed.nodes || [];
             const initialEdges = parsed.edges || [];
             const initialDrawings = parsed.drawings || [];
+            const initialContent = JSON.stringify({ nodes: initialNodes, edges: initialEdges, drawings: initialDrawings });
+            latestContentRef.current = initialContent;
+            lastAttemptedContentRef.current = initialContent;
+            const user = authService.getUserSync();
+            setSaveStatus(user && cloudSaveStatus.isPending(user.id, d.id)
+              ? (authService.isConfigured() ? 'cloud-failed' : 'local-only')
+              : 'ready');
             setNodes(initialNodes);
             setEdges(initialEdges);
             setDrawings(initialDrawings);
@@ -955,6 +1020,10 @@ export const Editor: React.FC = () => {
             }, 60);
           } catch (e) {
             console.error("Failed to parse visual content:", e);
+            const emptyContent = JSON.stringify({ nodes: [], edges: [], drawings: [] });
+            latestContentRef.current = emptyContent;
+            lastAttemptedContentRef.current = emptyContent;
+            setSaveStatus('ready');
             setNodes([]);
             setEdges([]);
             setDrawings([]);
@@ -963,7 +1032,10 @@ export const Editor: React.FC = () => {
           navigate('/dashboard');
         }
       });
-      return () => { isMounted = false; };
+      return () => {
+        isMounted = false;
+        activeDiagramIdRef.current = null;
+      };
     }
   }, [id, navigate]);
 
@@ -971,17 +1043,14 @@ export const Editor: React.FC = () => {
   useEffect(() => {
     if (!diagram) return;
     const currentJson = JSON.stringify({ nodes, edges, drawings });
-    if (currentJson === diagram.content) return;
+    latestContentRef.current = currentJson;
+    if (lastAttemptedContentRef.current === null || currentJson === lastAttemptedContentRef.current) return;
 
     setSaveStatus('saving');
-    const timer = setTimeout(async () => {
-      await diagramService.saveDiagram(diagram.id, currentJson);
-      setSaveStatus('saved');
-      setDiagram(prev => prev ? { ...prev, content: currentJson } : null);
-    }, 1000);
+    const timer = setTimeout(() => { void flushSave(); }, 1000);
 
     return () => clearTimeout(timer);
-  }, [nodes, edges, drawings, diagram]);
+  }, [nodes, edges, drawings, diagram, flushSave]);
 
   // Listen to keyboard shortcuts (V, M, H, P, Ctrl+Z, Ctrl+Y, Clipboard, Selection)
   useEffect(() => {
@@ -1088,21 +1157,6 @@ export const Editor: React.FC = () => {
     };
   }, [undo, redo, copySelection, cutSelection, pasteClipboard, duplicateSelection, selectAllNodes, selectedNodeIds, selectedEdgeId, selectedDrawingId, deleteSelectedNodes, deleteSelectedEdge, deleteSelectedDrawing]);
 
-  // Get coordinates for specific connection port handles
-  // For diamond shapes, ports are at the diamond vertices (midpoints of bounding box edges)
-  const getPortCoords = (node: CanvasNode, port: 'top' | 'bottom' | 'left' | 'right') => {
-    const { width, height } = getNodeDimensions(node);
-
-    // Both diamonds and rectangles use midpoints of bounding box edges.
-    // For diamonds (square bbox), these naturally align with the diamond vertices.
-    switch (port) {
-      case 'top': return { x: node.x + width / 2, y: node.y };
-      case 'bottom': return { x: node.x + width / 2, y: node.y + height };
-      case 'left': return { x: node.x, y: node.y + height / 2 };
-      case 'right': return { x: node.x + width, y: node.y + height / 2 };
-    }
-  };
-
   // Helper to find closest connection port on a given node relative to a canvas coordinate
   const getClosestPortOnNode = (
     node: CanvasNode, 
@@ -1126,358 +1180,8 @@ export const Editor: React.FC = () => {
     return { port: closestPort, coords: closestCoords, dist: minDist };
   };
 
-  // Check if a point is inside the bounding box of a node (including a safety padding)
-  // For diamond shapes, use rotated-square (diamond) hit testing for accuracy
-  const isPointInsideNode = (x: number, y: number, node: CanvasNode) => {
-    const { width, height } = getNodeDimensions(node);
-    const padding = 10;
-    const isDiamondType = node.type === 'decision' || node.type === 'activity-decision';
-
-    if (isDiamondType) {
-      // Diamond hit test: point must be within the diamond polygon
-      // Diamond vertices: top(cx, y), right(x+w, cy), bottom(cx, y+h), left(x, cy)
-      const cx = node.x + width / 2;
-      const cy = node.y + height / 2;
-      const hw = width / 2 + padding;
-      const hh = height / 2 + padding;
-      // Manhattan distance check for diamond: |dx/hw| + |dy/hh| <= 1
-      const dx = Math.abs(x - cx);
-      const dy = Math.abs(y - cy);
-      return (dx / hw + dy / hh) <= 1;
-    }
-
-    return (
-      x >= node.x - padding &&
-      x <= node.x + width + padding &&
-      y >= node.y - padding &&
-      y <= node.y + height + padding
-    );
-  };
-
-  // Check if a segment from p1 to p2 intersects the bounding box of a node (including padding)
-  // Uses reduced padding for diamond shapes to prevent false collisions at bounding box corners
-  const isSegmentIntersectingNode = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    node: CanvasNode
-  ) => {
-    const { width, height } = getNodeDimensions(node);
-    const isDiamondType = node.type === 'decision' || node.type === 'activity-decision';
-    const padding = isDiamondType ? 4 : 10; // Smaller padding for diamonds
-    const minX = node.x - padding;
-    const maxX = node.x + width + padding;
-    const minY = node.y - padding;
-    const maxY = node.y + height + padding;
-
-    if (p1.x === p2.x) {
-      // Vertical line segment
-      const x = p1.x;
-      const yStart = Math.min(p1.y, p2.y);
-      const yEnd = Math.max(p1.y, p2.y);
-      if (x >= minX && x <= maxX) {
-        return !(yEnd < minY || yStart > maxY);
-      }
-    } else if (p1.y === p2.y) {
-      // Horizontal line segment
-      const y = p1.y;
-      const xStart = Math.min(p1.x, p2.x);
-      const xEnd = Math.max(p1.x, p2.x);
-      if (y >= minY && y <= maxY) {
-        return !(xEnd < minX || xStart > maxX);
-      }
-    }
-    return false;
-  };
-
-  // Check if a segment is blocked by any node other than source and target nodes
-  const isSegmentBlocked = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    allNodes: CanvasNode[],
-    sourceId: string,
-    targetId: string
-  ) => {
-    for (const node of allNodes) {
-      if (node.id === sourceId || node.id === targetId) continue;
-      if (isSegmentIntersectingNode(p1, p2, node)) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // Helper to remove redundant collinear points from an orthogonal path
-  const simplifyOrthogonalPath = (pts: { x: number; y: number }[]): { x: number; y: number }[] => {
-    if (pts.length <= 2) return pts;
-    const result: { x: number; y: number }[] = [pts[0]];
-    for (let i = 1; i < pts.length - 1; i++) {
-      const prev = result[result.length - 1];
-      const curr = pts[i];
-      const next = pts[i + 1];
-
-      // Skip point if it is essentially identical to previous point
-      if (Math.abs(curr.x - prev.x) < 0.5 && Math.abs(curr.y - prev.y) < 0.5) continue;
-
-      // Check if prev, curr, and next lie along the same horizontal or vertical line
-      const isCollinearX = Math.abs(prev.x - curr.x) < 0.5 && Math.abs(curr.x - next.x) < 0.5;
-      const isCollinearY = Math.abs(prev.y - curr.y) < 0.5 && Math.abs(curr.y - next.y) < 0.5;
-      if (!isCollinearX && !isCollinearY) {
-        result.push(curr);
-      }
-    }
-    result.push(pts[pts.length - 1]);
-    return result;
-  };
-
-  const getOrthogonalRoutePath = (
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-    hA: 'top' | 'bottom' | 'left' | 'right',
-    hB: 'top' | 'bottom' | 'left' | 'right',
-    sourceNode: CanvasNode,
-    targetNode: CanvasNode,
-    allNodes: CanvasNode[]
-  ): string => {
-    const isHorizA = (hA === 'left' || hA === 'right');
-    const isHorizB = (hB === 'left' || hB === 'right');
-
-    // SMART STRAIGHT-LINE SNAPPING:
-    // 1. Both ports are vertical (top/bottom) and x positions are roughly aligned (within 14px)
-    if (!isHorizA && !isHorizB && Math.abs(start.x - end.x) <= 14) {
-      const straightX = Math.round((start.x + end.x) / 2);
-      const straightPath = [start, { x: straightX, y: start.y }, { x: straightX, y: end.y }, end];
-      let collides = false;
-      for (let i = 0; i < straightPath.length - 1; i++) {
-        if (isSegmentBlocked(straightPath[i], straightPath[i+1], allNodes, sourceNode.id, targetNode.id)) {
-          collides = true;
-          break;
-        }
-      }
-      if (!collides) {
-        return buildSvgPath(simplifyOrthogonalPath(straightPath));
-      }
-    }
-
-    // 2. Both ports are horizontal (left/right) and y positions are roughly aligned (within 14px)
-    if (isHorizA && isHorizB && Math.abs(start.y - end.y) <= 14) {
-      const straightY = Math.round((start.y + end.y) / 2);
-      const straightPath = [start, { x: start.x, y: straightY }, { x: end.x, y: straightY }, end];
-      let collides = false;
-      for (let i = 0; i < straightPath.length - 1; i++) {
-        if (isSegmentBlocked(straightPath[i], straightPath[i+1], allNodes, sourceNode.id, targetNode.id)) {
-          collides = true;
-          break;
-        }
-      }
-      if (!collides) {
-        return buildSvgPath(simplifyOrthogonalPath(straightPath));
-      }
-    }
-
-    const buffer = 20;
-
-    const getBufferPoint = (pt: { x: number; y: number }, handle: 'top' | 'bottom' | 'left' | 'right') => {
-      switch (handle) {
-        case 'top': return { x: pt.x, y: pt.y - buffer };
-        case 'bottom': return { x: pt.x, y: pt.y + buffer };
-        case 'left': return { x: pt.x - buffer, y: pt.y };
-        case 'right': return { x: pt.x + buffer, y: pt.y };
-      }
-    };
-
-    const startBuf = getBufferPoint(start, hA);
-    const endBuf = getBufferPoint(end, hB);
-
-    // Default simple path candidates (clean S-shape, L-shape, and loopbacks)
-    const candidates: { x: number; y: number }[][] = [];
-
-    const midX = Math.round((start.x + end.x) / 2);
-    const midY = Math.round((start.y + end.y) / 2);
-
-    if (isHorizA && isHorizB) {
-      // Horizontal connections
-      if (hA === 'right' && hB === 'left' && end.x > start.x + 10) {
-        candidates.push([start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]);
-      } else if (hA === 'left' && hB === 'right' && start.x > end.x + 10) {
-        candidates.push([start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]);
-      } else {
-        candidates.push([start, startBuf, { x: midX, y: startBuf.y }, { x: midX, y: endBuf.y }, endBuf, end]);
-      }
-      // Loop-backs
-      const minY = Math.min(start.y, end.y) - 40;
-      const maxY = Math.max(start.y, end.y) + 40;
-      candidates.push([start, startBuf, { x: startBuf.x, y: minY }, { x: endBuf.x, y: minY }, endBuf, end]);
-      candidates.push([start, startBuf, { x: startBuf.x, y: maxY }, { x: endBuf.x, y: maxY }, endBuf, end]);
-    } else if (!isHorizA && !isHorizB) {
-      // Vertical connections
-      if (hA === 'bottom' && hB === 'top' && end.y > start.y + 10) {
-        candidates.push([start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]);
-      } else if (hA === 'top' && hB === 'bottom' && start.y > end.y + 10) {
-        candidates.push([start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]);
-      } else {
-        candidates.push([start, startBuf, { x: startBuf.x, y: midY }, { x: endBuf.x, y: midY }, endBuf, end]);
-      }
-      // Loop-backs
-      const minX = Math.min(start.x, end.x) - 40;
-      const maxX = Math.max(start.x, end.x) + 40;
-      candidates.push([start, startBuf, { x: minX, y: startBuf.y }, { x: minX, y: endBuf.y }, endBuf, end]);
-      candidates.push([start, startBuf, { x: maxX, y: startBuf.y }, { x: maxX, y: endBuf.y }, endBuf, end]);
-    } else if (isHorizA && !isHorizB) {
-      // Horizontal to vertical (L-shape)
-      candidates.push([start, { x: end.x, y: start.y }, end]);
-      candidates.push([start, { x: start.x, y: end.y }, end]);
-      candidates.push([start, startBuf, { x: end.x, y: startBuf.y }, end]);
-    } else {
-      // Vertical to horizontal (L-shape)
-      candidates.push([start, { x: start.x, y: end.y }, end]);
-      candidates.push([start, { x: end.x, y: start.y }, end]);
-      candidates.push([start, startBuf, { x: startBuf.x, y: end.y }, end]);
-    }
-
-    // Check if any candidate has NO collisions
-    for (const path of candidates) {
-      let collides = false;
-      for (let i = 0; i < path.length - 1; i++) {
-        if (isSegmentBlocked(path[i], path[i+1], allNodes, sourceNode.id, targetNode.id)) {
-          collides = true;
-          break;
-        }
-      }
-      if (!collides) {
-        return buildSvgPath(simplifyOrthogonalPath(path));
-      }
-    }
-
-    // If all candidates collide, run Hanan Grid Dijkstra to find optimal bypass route
-    const xsSet = new Set<number>([start.x, startBuf.x, end.x, endBuf.x]);
-    const ysSet = new Set<number>([start.y, startBuf.y, end.y, endBuf.y]);
-
-    allNodes.forEach(node => {
-      // Add node bounds coordinates
-      const { width, height } = getNodeDimensions(node);
-      const padding = 20;
-      xsSet.add(node.x - padding);
-      xsSet.add(node.x + width + padding);
-      ysSet.add(node.y - padding);
-      ysSet.add(node.y + height + padding);
-    });
-
-    const xs = Array.from(xsSet).sort((a, b) => a - b);
-    const ys = Array.from(ysSet).sort((a, b) => a - b);
-
-    // Dijkstra search state
-    interface QueueItem {
-      pt: { x: number; y: number };
-      dist: number;
-      path: { x: number; y: number }[];
-      dir: 'H' | 'V' | null;
-    }
-
-    const startKey = `${startBuf.x},${startBuf.y}`;
-    const distMap: Record<string, number> = { [startKey]: 0 };
-    const queue: QueueItem[] = [{ pt: startBuf, dist: 0, path: [startBuf], dir: null }];
-    
-    let bestPath: { x: number; y: number }[] | null = null;
-    let minDist = Infinity;
-
-    while (queue.length > 0) {
-      let minIdx = 0;
-      for (let i = 1; i < queue.length; i++) {
-        if (queue[i].dist < queue[minIdx].dist) {
-          minIdx = i;
-        }
-      }
-      const curr = queue.splice(minIdx, 1)[0];
-
-      if (curr.pt.x === endBuf.x && curr.pt.y === endBuf.y) {
-        if (curr.dist < minDist) {
-          minDist = curr.dist;
-          bestPath = curr.path;
-        }
-        continue;
-      }
-
-      const currKey = `${curr.pt.x},${curr.pt.y}`;
-      if (curr.dist > (distMap[currKey] ?? Infinity)) {
-        continue;
-      }
-
-      const xIdx = xs.indexOf(curr.pt.x);
-      const yIdx = ys.indexOf(curr.pt.y);
-
-      const neighbors: { pt: { x: number; y: number }; dir: 'H' | 'V' }[] = [];
-      if (xIdx > 0) neighbors.push({ pt: { x: xs[xIdx - 1], y: curr.pt.y }, dir: 'H' });
-      if (xIdx < xs.length - 1) neighbors.push({ pt: { x: xs[xIdx + 1], y: curr.pt.y }, dir: 'H' });
-      if (yIdx > 0) neighbors.push({ pt: { x: curr.pt.x, y: ys[yIdx - 1] }, dir: 'V' });
-      if (yIdx < ys.length - 1) neighbors.push({ pt: { x: curr.pt.x, y: ys[yIdx + 1] }, dir: 'V' });
-
-      for (const nbr of neighbors) {
-        let insideObstacle = false;
-        for (const node of allNodes) {
-          if (node.id === sourceNode.id || node.id === targetNode.id) continue;
-          if (isPointInsideNode(nbr.pt.x, nbr.pt.y, node)) {
-            insideObstacle = true;
-            break;
-          }
-        }
-        if (insideObstacle) continue;
-
-        if (isSegmentBlocked(curr.pt, nbr.pt, allNodes, sourceNode.id, targetNode.id)) {
-          continue;
-        }
-
-        const edgeLen = Math.abs(nbr.pt.x - curr.pt.x) + Math.abs(nbr.pt.y - curr.pt.y);
-        const turnPenalty = (curr.dir && curr.dir !== nbr.dir) ? 150 : 0;
-        const newDist = curr.dist + edgeLen + turnPenalty;
-
-        const nbrKey = `${nbr.pt.x},${nbr.pt.y}`;
-        if (newDist < (distMap[nbrKey] ?? Infinity)) {
-          distMap[nbrKey] = newDist;
-          queue.push({
-            pt: nbr.pt,
-            dist: newDist,
-            path: [...curr.path, nbr.pt],
-            dir: nbr.dir
-          });
-        }
-      }
-    }
-
-    if (bestPath) {
-      return buildSvgPath([start, ...bestPath, end]);
-    }
-
-    return buildSvgPath(candidates[0]);
-  };
-
-  const buildSvgPath = (pts: { x: number; y: number }[]): string => {
-    if (pts.length === 0) return '';
-    let path = `M ${pts[0].x} ${pts[0].y}`;
-    for (let i = 1; i < pts.length; i++) {
-      path += ` L ${pts[i].x} ${pts[i].y}`;
-    }
-    return path;
-  };
-
-  // Create orthogonal segments path or standard straight path
-  const getEdgePath = (edge: CanvasEdge) => {
-    const sourceNode = nodes.find(n => n.id === edge.source);
-    const targetNode = nodes.find(n => n.id === edge.target);
-    if (!sourceNode || !targetNode) return '';
-
-    const start = getPortCoords(sourceNode, edge.sourceHandle || 'right');
-    const end = getPortCoords(targetNode, edge.targetHandle || 'left');
-
-    return getOrthogonalRoutePath(
-      start,
-      end,
-      edge.sourceHandle || 'right',
-      edge.targetHandle || 'left',
-      sourceNode,
-      targetNode,
-      nodes
-    );
-  };
+  // All diagram surfaces use the same port geometry and obstacle-aware routing.
+  const getEdgePath = (edge: CanvasEdge) => calculateEdgePath(edge, nodes);
 
   // Viewport / drag actions
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.15, 3));
@@ -2611,17 +2315,23 @@ export const Editor: React.FC = () => {
             <span>Auto-Align</span>
           </button>
 
-          <div className="text-ink-soft flex items-center gap-1.5 text-[11px] sm:text-[12px]">
-            {saveStatus === 'saved' ? (
+          <div className="text-ink-soft flex items-center gap-1.5 text-[11px] sm:text-[12px]" role="status" aria-live="polite">
+            {saveStatus === 'saving' ? (
+              <><span className="w-1.5 h-1.5 rounded-full bg-signal animate-ping" /><span>Saving…</span></>
+            ) : saveStatus === 'cloud-saved' ? (
+              <><Check className="w-3.5 h-3.5 text-emerald-600" /><span className="hidden sm:inline">Saved</span></>
+            ) : saveStatus === 'local-only' ? (
+              <><Check className="w-3.5 h-3.5 text-blueprint" /><span className="hidden sm:inline">Saved on this device</span></>
+            ) : saveStatus === 'cloud-failed' || saveStatus === 'failed' ? (
               <>
-                <Check className="w-3.5 h-3.5 text-blueprint" />
-                <span className="hidden sm:inline">saved</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-signal shrink-0" />
+                <span title={saveStatus === 'cloud-failed' ? 'Saved on this device; account save failed' : 'Could not save this diagram'}>
+                  {saveStatus === 'cloud-failed' ? 'Saved on device; account save failed' : 'Save failed'}
+                </span>
+                <button type="button" onClick={retrySave} className="text-blueprint underline font-bold cursor-pointer">Retry</button>
               </>
             ) : (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-signal animate-ping"></span>
-                <span className="hidden sm:inline">saving...</span>
-              </>
+              <span className="hidden sm:inline">Ready</span>
             )}
           </div>
           <button
@@ -2637,6 +2347,17 @@ export const Editor: React.FC = () => {
             <Download className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Export</span>
           </Button>
+
+          {/* Feedback & Diagnostics Trigger */}
+          <button
+            type="button"
+            onClick={() => setIsFeedbackOpen(true)}
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 border border-line hover:border-ink bg-paper text-[11px] text-ink-soft hover:text-ink transition-colors cursor-pointer"
+            title="Submit Feedback or Report an Issue"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-blueprint" />
+            <span>Feedback</span>
+          </button>
 
           {/* Properties Inspector Toggle */}
           <button
@@ -3552,7 +3273,7 @@ export const Editor: React.FC = () => {
             className="absolute inset-0 pointer-events-none"
           >
             {/* SVG rendering layer */}
-            <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-auto">
+            <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-auto overflow-visible">
               <defs>
                 <marker
                   id="arrow"
@@ -3860,16 +3581,8 @@ export const Editor: React.FC = () => {
                 const path = getEdgePath(edge);
                 if (!path) return null;
 
-                const srcNode = nodes.find(n => n.id === edge.source);
-                const tgtNode = nodes.find(n => n.id === edge.target);
-                let labelX = 0;
-                let labelY = 0;
-                if (srcNode && tgtNode) {
-                  const start = getPortCoords(srcNode, edge.sourceHandle || 'right');
-                  const end = getPortCoords(tgtNode, edge.targetHandle || 'left');
-                  labelX = (start.x + end.x) / 2;
-                  labelY = (start.y + end.y) / 2 - 8;
-                }
+                const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
+                const labelY = routeLabelY - 8;
 
                 return (
                   <g key={edge.id} className="cursor-pointer">
@@ -4027,7 +3740,7 @@ export const Editor: React.FC = () => {
 
                 let shapeClasses = "bg-paper-raised border-ink flex flex-col justify-between p-4";
                 if (isDiamond) {
-                  shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 relative shadow-none";
+                  shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 shadow-none";
                 } else if (node.type === 'text') {
                   shapeClasses = "bg-transparent flex items-center justify-center p-2";
                 } else if (node.type === 'table') {
@@ -4037,7 +3750,7 @@ export const Editor: React.FC = () => {
                 } else if (node.type === 'dfd-store') {
                   shapeClasses = "border-y border-x-0 border-ink bg-paper-raised flex flex-col justify-center p-2";
                 } else if (node.type === 'dfd-entity') {
-                  shapeClasses = "border-ink bg-paper-raised flex flex-col justify-between p-4 relative";
+                  shapeClasses = "border-ink bg-paper-raised flex flex-col justify-between p-4";
                 } else if (node.type === 'dfd-process') {
                   shapeClasses = "border-ink bg-paper-raised flex flex-col p-0";
                 } else if (node.type === 'usecase-actor') {
@@ -5733,6 +5446,20 @@ export const Editor: React.FC = () => {
         description={`This will erase all ${nodes.length} node(s), ${edges.length} connector(s), and freehand drawings from the active drafting sheet.`}
         confirmText="Clear Canvas"
         danger={true}
+      />
+
+      {/* Feedback & Diagnostics Modal */}
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+        diagramContext={{
+          id: diagram?.id,
+          type: diagram?.type,
+          title: diagram?.title,
+          nodeCount: nodes.length,
+          edgeCount: edges.length,
+          zoom
+        }}
       />
     </div>
   );

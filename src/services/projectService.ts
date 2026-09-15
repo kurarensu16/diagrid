@@ -2,6 +2,8 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { authService } from './authService';
 import { mockDb, type Project } from './mockDb';
 import { adminService } from './adminService';
+import { cloudSaveStatus } from './cloudSaveStatus';
+import { offlineSyncService } from './offlineSyncService';
 
 export interface ProjectWithStats extends Project {
   diagramCount?: number;
@@ -9,6 +11,17 @@ export interface ProjectWithStats extends Project {
 
 // Track whether initial migration from localStorage has run in this session
 let hasMigratedLocal = false;
+
+const withPendingProjects = (projects: ProjectWithStats[], userId: string): ProjectWithStats[] => {
+  const byId = new Map(projects.map(project => [project.id, project]));
+  for (const id of cloudSaveStatus.pendingProjectDeletionIds(userId)) byId.delete(id);
+  for (const id of cloudSaveStatus.pendingProjectIds(userId)) {
+    if (cloudSaveStatus.isProjectDeletionPending(userId, id)) continue;
+    const local = mockDb.getProject(id);
+    if (local) byId.set(id, { ...local, diagramCount: mockDb.getDiagrams(id).length });
+  }
+  return [...byId.values()];
+};
 
 export const projectService = {
   /**
@@ -32,8 +45,9 @@ export const projectService = {
     }
 
     try {
+      await offlineSyncService.syncPending();
       // Auto-migrate local projects once per session
-      if (!hasMigratedLocal) {
+      if (!hasMigratedLocal && cloudSaveStatus.pendingProjectIds(user.id).length === 0) {
         hasMigratedLocal = true;
         await projectService.migrateLocalProjects(user.id);
       }
@@ -53,15 +67,15 @@ export const projectService = {
 
       if (error) {
         console.warn('[projectService] getProjects notice:', error.message);
-        return mockDb.getProjects().map(p => ({
+        return withPendingProjects(mockDb.getProjects().map(p => ({
           ...p,
           diagramCount: mockDb.getDiagrams(p.id).length
-        }));
+        })), user.id);
       }
 
-      if (!data) return [];
+      if (!data) return withPendingProjects([], user.id);
 
-      return data.map((p: any) => ({
+      const cloudProjects = data.map((p: any) => ({
         id: p.id,
         name: p.name,
         description: p.description || '',
@@ -69,6 +83,12 @@ export const projectService = {
         updated_at: p.updated_at,
         diagramCount: Array.isArray(p.diagrams) && p.diagrams[0] ? p.diagrams[0].count : (p.diagrams?.count || 0)
       }));
+      for (const project of cloudProjects) {
+        if (!cloudSaveStatus.isProjectPending(user.id, project.id) && !cloudSaveStatus.isProjectDeletionPending(user.id, project.id)) {
+          try { mockDb.upsertProject(project); } catch { /* Cloud data is still readable. */ }
+        }
+      }
+      return withPendingProjects(cloudProjects, user.id);
     } catch (err) {
       console.warn('[projectService] getProjects error, using fallback:', err);
       return mockDb.getProjects().map(p => ({
@@ -82,11 +102,17 @@ export const projectService = {
    * Fetches a single project by ID.
    */
   getProject: async (id: string): Promise<Project | null> => {
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
+    const user = authService.getUserSync();
+    if (!isSupabaseConfigured() || !user) {
       return mockDb.getProject(id) || null;
     }
 
     try {
+      await offlineSyncService.syncPending();
+      if (cloudSaveStatus.isProjectDeletionPending(user.id, id)) return null;
+      if (cloudSaveStatus.isProjectPending(user.id, id)) {
+        return mockDb.getProject(id) || null;
+      }
       const { data, error } = await supabase
         .from('projects')
         .select('*')
@@ -98,13 +124,15 @@ export const projectService = {
         return mockDb.getProject(id) || null;
       }
 
-      return {
+      const project: Project = {
         id: data.id,
         name: data.name,
         description: data.description || '',
         created_at: data.created_at,
         updated_at: data.updated_at
       };
+      try { mockDb.upsertProject(project); } catch { /* Cloud data is still readable. */ }
+      return project;
     } catch {
       return mockDb.getProject(id) || null;
     }
@@ -120,48 +148,47 @@ export const projectService = {
       return mockDb.createProject(name, description);
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('projects')
-        .insert({
-          name: name.trim(),
-          description: description.trim(),
-          user_id: user.id
-        })
-        .select()
-        .single();
-
-      if (error || !data) {
-        console.warn('[projectService] createProject Supabase failed, using local fallback:', error?.message);
-        return mockDb.createProject(name, description);
-      }
-
-      const newProj: Project = {
-        id: data.id,
-        name: data.name,
-        description: data.description || '',
-        created_at: data.created_at,
-        updated_at: data.updated_at
-      };
-
-      // Keep local mockDb mirrored
-      mockDb.createProject(name, description);
-
-      // Audit log trigger
-      adminService.logActivity('created_project', name.trim(), user.email);
-
-      return newProj;
-    } catch {
-      return mockDb.createProject(name, description);
+    // One UUID is used by the browser and account, so a failed or uncertain
+    // request can be retried without making a duplicate project.
+    const now = new Date().toISOString();
+    const project: Project = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      description: description.trim(),
+      created_at: now,
+      updated_at: now,
+    };
+    if (!cloudSaveStatus.markProjectPending(user.id, project.id)) {
+      throw new Error('Could not prepare a safe account sync. Please try again.');
     }
+    try {
+      mockDb.upsertProject(project);
+    } catch (error) {
+      cloudSaveStatus.clearPendingProject(user.id, project.id);
+      throw error;
+    }
+    await offlineSyncService.syncPending();
+    if (!cloudSaveStatus.isProjectPending(user.id, project.id)) {
+      void adminService.logActivity('created_project', name.trim(), user.email);
+    }
+    return project;
   },
 
   /**
    * Updates project details (name, description).
    */
   updateProject: async (id: string, updates: Partial<Project>): Promise<Project | null> => {
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
+    const user = authService.getUserSync();
+    if (!isSupabaseConfigured() || !user) {
       return mockDb.updateProject(id, updates) || null;
+    }
+
+    if (mockDb.getProject(id) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      if (!cloudSaveStatus.markProjectPending(user.id, id)) return null;
+      const local = mockDb.updateProject(id, updates);
+      if (!local) return null;
+      await offlineSyncService.syncPending();
+      return local;
     }
 
     try {
@@ -203,24 +230,21 @@ export const projectService = {
       return true;
     }
 
+    if (!cloudSaveStatus.markProjectDeletion(user.id, id)) return false;
+    const childIds = mockDb.getDiagrams(id).map(diagram => diagram.id);
     try {
-      const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', id);
-
       mockDb.deleteProject(id);
-
-      // Audit log trigger
-      if (!error) {
-        adminService.logActivity('deleted_project', `Project ${id}`, user.email);
-      }
-
-      return !error;
     } catch {
-      mockDb.deleteProject(id);
-      return true;
+      cloudSaveStatus.clearProjectDeletion(user.id, id);
+      return false;
     }
+    cloudSaveStatus.clearPendingProject(user.id, id);
+    for (const diagramId of childIds) cloudSaveStatus.clearPendingDiagram(user.id, diagramId);
+    await offlineSyncService.syncPending();
+    if (!cloudSaveStatus.isProjectDeletionPending(user.id, id)) {
+      void adminService.logActivity('deleted_project', `Project ${id}`, user.email);
+    }
+    return true;
   },
 
   /**
@@ -238,7 +262,7 @@ export const projectService = {
         .select('*', { count: 'exact', head: true });
 
       // If user already has projects in cloud, skip auto-import
-      if (count && count > 0) return;
+      if (count !== 0) return;
 
       for (const proj of localProjects) {
         const { data: newProj } = await supabase

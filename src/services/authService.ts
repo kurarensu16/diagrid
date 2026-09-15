@@ -16,7 +16,6 @@ export interface AuthUser {
   isSupporter?: boolean;
 }
 
-const ADMIN_EMAIL = 'admin@diagrid.dev';
 const STORAGE_KEY = 'diagrid_auth_user';
 
 const authListeners: Set<(user: AuthUser | null) => void> = new Set();
@@ -59,19 +58,11 @@ const setCachedUser = (user: AuthUser | null) => {
 let cachedUser: AuthUser | null = getStoredUser();
 let isInitialized = false;
 let pendingProfilePromise: Promise<AuthUser> | null = null;
-let profileFetchFailed = false;
 
 /**
  * Fetches user profile from public.profiles table or builds fallback from session metadata.
  */
 const fetchProfile = async (userId: string, email: string): Promise<AuthUser> => {
-  const normalizedEmail = email.toLowerCase().trim();
-  const isAdminEmail = normalizedEmail === ADMIN_EMAIL || normalizedEmail.includes('admin');
-
-  if (cachedUser && cachedUser.id === userId && profileFetchFailed) {
-    return cachedUser;
-  }
-
   if (pendingProfilePromise) {
     return pendingProfilePromise;
   }
@@ -85,16 +76,14 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
         .single();
 
       if (error || !profile) {
-        profileFetchFailed = true;
-        const role: 'user' | 'admin' = isAdminEmail ? 'admin' : 'user';
         const currentSavedTheme = cachedUser?.theme || themeService.getTheme() || 'blueprint';
         const fallbackUser: AuthUser = {
           id: userId,
           email,
-          role,
+          role: 'user',
           name: email.split('@')[0],
           avatarType: 'preset',
-          presetAvatar: role === 'admin' ? 'shield' : 'terminal',
+          presetAvatar: 'terminal',
           theme: currentSavedTheme,
           gridStyle: 'lines',
           snapToGrid: true,
@@ -103,8 +92,7 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
         return fallbackUser;
       }
 
-      profileFetchFailed = false;
-      const resolvedRole: 'user' | 'admin' = (profile.role === 'admin' || isAdminEmail) ? 'admin' : 'user';
+      const resolvedRole: 'user' | 'admin' = profile.role === 'admin' ? 'admin' : 'user';
 
       const resolvedUser: AuthUser = {
         id: profile.id,
@@ -124,16 +112,14 @@ const fetchProfile = async (userId: string, email: string): Promise<AuthUser> =>
       setCachedUser(resolvedUser);
       return resolvedUser;
     } catch {
-      profileFetchFailed = true;
-      const role: 'user' | 'admin' = isAdminEmail ? 'admin' : 'user';
       const currentSavedTheme = cachedUser?.theme || themeService.getTheme() || 'blueprint';
       const fallbackUser: AuthUser = {
         id: userId,
         email,
-        role,
+        role: 'user',
         name: email.split('@')[0],
         avatarType: 'preset',
-        presetAvatar: role === 'admin' ? 'shield' : 'terminal',
+        presetAvatar: 'terminal',
         theme: currentSavedTheme,
         gridStyle: 'lines',
         snapToGrid: true,
@@ -223,9 +209,6 @@ export const authService = {
       };
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const isAdminEmail = normalizedEmail === ADMIN_EMAIL || normalizedEmail.includes('admin');
-
     const redirectUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/dashboard`
       : 'http://localhost:5173/dashboard';
@@ -237,7 +220,6 @@ export const authService = {
         emailRedirectTo: redirectUrl,
         data: {
           name: name?.trim() || email.split('@')[0],
-          role: isAdminEmail ? 'admin' : 'user',
         },
       },
     });

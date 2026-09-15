@@ -6,6 +6,7 @@ import { useCurrentUser } from '../services/mockAuth';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../services/mockDb';
 import { type FreehandDrawing, getNodeDimensions } from '../utils/diagramExport';
 import { decodeSharePayload } from '../utils/shareUtils';
+import { calculateEdgePath, getEdgeLabelPosition } from '../utils/edgeRouting';
 import { ExportModal } from '../components/canvas/ExportModal';
 import { ShareModal } from '../components/canvas/ShareModal';
 import { Logo } from '../components/ui/Logo';
@@ -24,41 +25,6 @@ import {
   RotateCcw
 } from 'lucide-react';
 
-const getPortCoords = (node: CanvasNode, port: 'top' | 'bottom' | 'left' | 'right') => {
-  const { width, height } = getNodeDimensions(node);
-  switch (port) {
-    case 'top': return { x: node.x + width / 2, y: node.y };
-    case 'bottom': return { x: node.x + width / 2, y: node.y + height };
-    case 'left': return { x: node.x, y: node.y + height / 2 };
-    case 'right': return { x: node.x + width, y: node.y + height / 2 };
-  }
-};
-
-const getEdgePath = (edge: CanvasEdge, nodesList: CanvasNode[]) => {
-  const sourceNode = nodesList.find(n => n.id === edge.source);
-  const targetNode = nodesList.find(n => n.id === edge.target);
-  if (!sourceNode || !targetNode) return '';
-
-  const start = getPortCoords(sourceNode, edge.sourceHandle || 'right');
-  const end = getPortCoords(targetNode, edge.targetHandle || 'left');
-
-  const midX = (start.x + end.x) / 2;
-  const midY = (start.y + end.y) / 2;
-
-  if (edge.sourceHandle === 'bottom' && edge.targetHandle === 'top') {
-    return `M ${start.x} ${start.y} L ${start.x} ${midY} L ${end.x} ${midY} L ${end.x} ${end.y}`;
-  }
-  if (edge.sourceHandle === 'top' && edge.targetHandle === 'bottom') {
-    return `M ${start.x} ${start.y} L ${start.x} ${midY} L ${end.x} ${midY} L ${end.x} ${end.y}`;
-  }
-  if ((edge.sourceHandle === 'right' || !edge.sourceHandle) && (edge.targetHandle === 'left' || !edge.targetHandle)) {
-    return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
-  }
-  if (edge.sourceHandle === 'left' && edge.targetHandle === 'right') {
-    return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
-  }
-  return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
-};
 
 const getMarkerUrl = (
   markerType: CanvasEdge['sourceMarker'],
@@ -612,6 +578,28 @@ export const PublicViewer: React.FC = () => {
                 </marker>
               </defs>
 
+              {/* Render sequence diagram lifelines */}
+              {diagram.type === 'sequence' && nodes
+                .filter(node => node.type !== 'sequence-activation')
+                .map(node => {
+                  const { width, height } = getNodeDimensions(node);
+                  const startX = node.x + width / 2;
+                  const startY = node.y + height;
+                  const endY = startY + 600;
+                  return (
+                    <line
+                      key={`lifeline-${node.id}`}
+                      x1={startX}
+                      y1={startY}
+                      x2={startX}
+                      y2={endY}
+                      stroke={isDark ? '#8B98A0' : '#8B98A0'}
+                      strokeWidth="1.5"
+                      strokeDasharray="4 4"
+                    />
+                  );
+                })}
+
               {/* Freehand Pencil Drawings */}
               {drawings.map((draw) => (
                 <path
@@ -629,19 +617,11 @@ export const PublicViewer: React.FC = () => {
 
               {/* Connector Edges */}
               {edges.map((edge) => {
-                const path = getEdgePath(edge, nodes);
+                const path = calculateEdgePath(edge, nodes);
                 if (!path) return null;
 
-                const srcNode = nodes.find(n => n.id === edge.source);
-                const tgtNode = nodes.find(n => n.id === edge.target);
-                let labelX = 0;
-                let labelY = 0;
-                if (srcNode && tgtNode) {
-                  const start = getPortCoords(srcNode, edge.sourceHandle || 'right');
-                  const end = getPortCoords(tgtNode, edge.targetHandle || 'left');
-                  labelX = (start.x + end.x) / 2;
-                  labelY = (start.y + end.y) / 2 - 8;
-                }
+                const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
+                const labelY = routeLabelY - 8;
 
                 const markerStartUrl = getMarkerUrl(edge.sourceMarker, edge.arrow, true, false);
                 const markerEndUrl = getMarkerUrl(edge.targetMarker, edge.arrow, false, false);
@@ -686,242 +666,292 @@ export const PublicViewer: React.FC = () => {
             </svg>
 
             {/* Interactive Canvas Nodes Layer */}
-            {nodes.map((node) => {
-              const { width, height } = getNodeDimensions(node);
-              const isSelected = selectedNodeId === node.id;
-              const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
+            <div className="absolute inset-0 pointer-events-none">
+              {nodes.map((node) => {
+                const { width, height } = getNodeDimensions(node);
+                const isSelected = selectedNodeId === node.id;
+                const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
 
-              // Shadow calculation
-              let customBoxShadow = '3px 3px 0px 0px #15191C';
-              if (node.shadowAccent === 'none') {
-                customBoxShadow = 'none';
-              } else if (node.shadowAccent) {
-                customBoxShadow = `3px 3px 0px 0px ${node.shadowAccent}`;
-              }
+                const colorVal = node.width || 1;
+                const applyShadow = !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
 
-              // Shape specific classes
-              let shapeClasses = isDark
-                ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex items-center justify-center text-center p-2"
-                : "bg-paper-raised text-ink border-2 border-ink flex items-center justify-center text-center p-2";
+                let customBoxShadow = '';
+                if (applyShadow) {
+                  if (node.shadowAccent === 'none') {
+                    customBoxShadow = 'none';
+                  } else if (node.shadowAccent) {
+                    customBoxShadow = `3px 3px 0px 0px ${node.shadowAccent}`;
+                  } else {
+                    customBoxShadow = colorVal === 1 ? '3px 3px 0px 0px #1E5C8C' : colorVal === 2 ? '3px 3px 0px 0px #D45B33' : '3px 3px 0px 0px #15191C';
+                  }
+                }
 
-              if (node.type === 'terminal') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] rounded-full flex items-center justify-center text-center px-4"
-                  : "bg-paper-raised text-ink border-2 border-ink rounded-full flex items-center justify-center text-center px-4";
-              } else if (node.type === 'table') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex flex-col p-0 text-left items-stretch"
-                  : "bg-paper-raised text-ink border-2 border-ink flex flex-col p-0 text-left items-stretch";
-              } else if (node.type === 'text') {
-                shapeClasses = "bg-transparent text-ink border-0 flex items-center justify-center p-1";
-                customBoxShadow = 'none';
-              } else if (isDiamond) {
-                shapeClasses = "bg-transparent border-0 p-0 flex items-center justify-center";
-                customBoxShadow = 'none';
-              } else if (node.type === 'dfd-store') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] text-white border-y-2 border-x-0 border-[#E1E5E3] flex items-center justify-center text-center px-3"
-                  : "bg-paper-raised text-ink border-y-2 border-x-0 border-ink flex items-center justify-center text-center px-3";
-              } else if (node.type === 'dfd-entity') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex flex-col justify-center items-center p-3 relative"
-                  : "bg-paper-raised text-ink border-2 border-ink flex flex-col justify-center items-center p-3 relative";
-              } else if (node.type === 'dfd-process') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] text-white border-2 border-[#E1E5E3] rounded-lg flex flex-col p-0 text-left items-stretch overflow-hidden"
-                  : "bg-paper-raised text-ink border-2 border-ink rounded-lg flex flex-col p-0 text-left items-stretch overflow-hidden";
-              } else if (node.type === 'usecase-boundary') {
-                shapeClasses = "bg-transparent border-2 border-dashed border-blueprint flex flex-col p-3 text-left";
-                customBoxShadow = 'none';
-              } else if (node.type === 'usecase-oval') {
-                shapeClasses = isDark
-                  ? "rounded-[50%] bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex items-center justify-center p-3 text-center"
-                  : "rounded-[50%] bg-paper-raised text-ink border-2 border-ink flex items-center justify-center p-3 text-center";
-              } else if (node.type === 'sequence-activation') {
-                shapeClasses = isDark
-                  ? "bg-[#1C2226] border border-[#E1E5E3] flex items-center justify-center p-0"
-                  : "bg-paper-raised border border-ink flex items-center justify-center p-0";
-                customBoxShadow = 'none';
-              } else if (node.type === 'activity-start') {
-                shapeClasses = isDark
-                  ? "rounded-full bg-white flex items-center justify-center p-0 border-0"
-                  : "rounded-full bg-ink flex items-center justify-center p-0 border-0";
-                customBoxShadow = 'none';
-              } else if (node.type === 'activity-end') {
-                shapeClasses = isDark
-                  ? "rounded-full bg-transparent border-2 border-white flex items-center justify-center p-0"
-                  : "rounded-full bg-transparent border-2 border-ink flex items-center justify-center p-0";
-                customBoxShadow = 'none';
-              } else if (node.type === 'activity-action') {
-                shapeClasses = isDark
-                  ? "rounded-xl bg-[#1C2226] text-white border-2 border-[#E1E5E3] flex items-center justify-center text-center p-2"
-                  : "rounded-xl bg-paper-raised text-ink border-2 border-ink flex items-center justify-center text-center p-2";
-              } else if (node.type === 'activity-fork') {
-                shapeClasses = isDark
-                  ? "bg-white flex items-center justify-center p-0 border-0 rounded-[1px]"
-                  : "bg-ink flex items-center justify-center p-0 border-0 rounded-[1px]";
-                customBoxShadow = 'none';
-              }
+                const nodeBorderStyle = node.borderStyle || (node.type === 'text' ? 'none' : node.type === 'usecase-boundary' ? 'dashed' : 'solid');
+                const nodeBorderWidth = nodeBorderStyle === 'none' ? '0px' : (node.borderWidth ? `${node.borderWidth}px` : (node.type === 'activity-end' ? '2.5px' : '1.5px'));
+                const effectiveFontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
+                const textStyleObj: React.CSSProperties = { fontSize: `${effectiveFontSize}px` };
+                const textClass = `${node.textAlign === 'left' ? 'text-left' : node.textAlign === 'right' ? 'text-right' : 'text-center'} ${node.isBold === false ? 'font-normal' : 'font-bold'}`;
 
-              const fontSizeClass = node.fontSize === 'sm' ? 'text-[11px]' : node.fontSize === 'lg' ? 'text-[15px]' : 'text-[12.5px]';
-              const textStyleObj: React.CSSProperties = {
-                fontSize: node.customFontSize ? `${node.customFontSize}px` : undefined,
-                fontWeight: node.isBold === false ? 'normal' : 'bold',
-                textAlign: node.textAlign || 'center',
-              };
+                let shapeClasses = isDark
+                  ? "bg-[#1C2226] text-white border-[#E1E5E3] flex flex-col justify-between p-4"
+                  : "bg-paper-raised text-ink border-ink flex flex-col justify-between p-4";
 
-              return (
-                <div
-                  key={node.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedNodeId(node.id === selectedNodeId ? null : node.id);
-                  }}
-                  style={{
-                    left: `${node.x}px`,
-                    top: `${node.y}px`,
-                    width: `${width}px`,
-                    height: `${height}px`,
-                    backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
-                    boxShadow: customBoxShadow || undefined,
-                  }}
-                  className={`absolute pointer-events-auto select-none cursor-pointer transition-shadow hover:brightness-105 ${shapeClasses} ${
-                    isSelected ? '!ring-2 !ring-blueprint !ring-offset-2' : ''
-                  }`}
-                >
-                  {/* Shape Renderers */}
-                  {isDiamond ? (
-                    <div className="relative w-full h-full flex items-center justify-center pointer-events-none select-none">
-                      <svg
-                        className="absolute inset-0 w-full h-full overflow-visible pointer-events-none"
-                        viewBox={`0 0 ${width} ${height}`}
-                      >
-                        {node.shadowAccent !== 'none' && (
+                if (isDiamond) {
+                  shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 shadow-none";
+                } else if (node.type === 'text') {
+                  shapeClasses = "bg-transparent flex items-center justify-center p-2";
+                } else if (node.type === 'table') {
+                  shapeClasses = isDark ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col p-0" : "border-ink bg-paper-raised flex flex-col p-0";
+                } else if (node.type === 'terminal') {
+                  shapeClasses = isDark
+                    ? "rounded-[20px] bg-[#1C2226] text-white border-[#E1E5E3] flex items-center justify-center p-2"
+                    : "rounded-[20px] bg-paper-raised text-ink border-ink flex items-center justify-center p-2";
+                } else if (node.type === 'dfd-store') {
+                  shapeClasses = isDark
+                    ? "border-y border-x-0 border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-center p-2"
+                    : "border-y border-x-0 border-ink bg-paper-raised flex flex-col justify-center p-2";
+                } else if (node.type === 'dfd-entity') {
+                  shapeClasses = isDark
+                    ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-between p-4"
+                    : "border-ink bg-paper-raised flex flex-col justify-between p-4";
+                } else if (node.type === 'dfd-process') {
+                  shapeClasses = isDark
+                    ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col p-0"
+                    : "border-ink bg-paper-raised flex flex-col p-0";
+                } else if (node.type === 'usecase-actor') {
+                  shapeClasses = "flex flex-col items-center justify-center p-1 bg-transparent border-0 select-none shadow-none";
+                } else if (node.type === 'usecase-oval') {
+                  shapeClasses = isDark
+                    ? "rounded-[50%] bg-[#1C2226] text-white border-[#E1E5E3] flex items-center justify-center p-3 text-center"
+                    : "rounded-[50%] bg-paper-raised text-ink border-ink flex items-center justify-center p-3 text-center";
+                } else if (node.type === 'usecase-boundary') {
+                  shapeClasses = isDark
+                    ? "border-dashed border-[#333C42] bg-[#15191C] bg-opacity-40 flex flex-col justify-start p-3"
+                    : "border-dashed border-ink bg-paper bg-opacity-20 flex flex-col justify-start p-3";
+                } else if (node.type === 'sequence-activation') {
+                  shapeClasses = isDark ? "border-[#E1E5E3] bg-[#1C2226] flex items-center justify-center p-0" : "border-ink bg-paper-raised flex items-center justify-center p-0";
+                } else if (node.type === 'activity-start') {
+                  shapeClasses = `rounded-full ${isDark ? 'bg-white' : 'bg-ink'} flex items-center justify-center p-0 border-0`;
+                } else if (node.type === 'activity-end') {
+                  shapeClasses = isDark ? "rounded-full bg-transparent border-[#E1E5E3] flex items-center justify-center p-0" : "rounded-full bg-transparent border-ink flex items-center justify-center p-0";
+                } else if (node.type === 'activity-action') {
+                  shapeClasses = isDark
+                    ? "rounded-xl bg-[#1C2226] text-white border-[#E1E5E3] flex items-center justify-center p-2"
+                    : "rounded-xl bg-paper-raised text-ink border-ink flex items-center justify-center p-2";
+                } else if (node.type === 'activity-fork') {
+                  shapeClasses = `${isDark ? 'bg-white' : 'bg-ink'} flex items-center justify-center p-0 border-0 rounded-[1px]`;
+                }
+
+                return (
+                  <div
+                    key={node.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedNodeId(node.id === selectedNodeId ? null : node.id);
+                    }}
+                    style={{
+                      left: `${node.x}px`,
+                      top: `${node.y}px`,
+                      width: `${width}px`,
+                      height: `${height}px`,
+                      backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
+                      boxShadow: customBoxShadow || undefined,
+                      borderStyle: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? (nodeBorderStyle === 'none' ? 'none' : nodeBorderStyle) : undefined,
+                      borderWidth: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? nodeBorderWidth : undefined,
+                    }}
+                    className={`absolute pointer-events-auto select-none cursor-pointer transition-shadow hover:brightness-105 ${shapeClasses} ${
+                      isSelected && !isDiamond
+                        ? nodeBorderStyle === 'none'
+                          ? '!border !border-dashed !border-blueprint'
+                          : 'border-blueprint !border-2'
+                        : isSelected
+                        ? '!ring-2 !ring-blueprint !ring-offset-2'
+                        : ''
+                    }`}
+                  >
+                    {/* Shape Renderers */}
+                    {isDiamond ? (
+                      <div className="relative w-full h-full flex items-center justify-center pointer-events-none select-none">
+                        <svg
+                          className="absolute inset-0 w-full h-full overflow-visible pointer-events-none"
+                          viewBox={`0 0 ${width} ${height}`}
+                        >
+                          {node.shadowAccent !== 'none' && (
+                            <polygon
+                              points={`${width / 2 + 3},${3} ${width + 3},${height / 2 + 3} ${width / 2 + 3},${height + 3} ${3},${height / 2 + 3}`}
+                              fill={node.shadowAccent || (colorVal === 1 ? '#1E5C8C' : colorVal === 2 ? '#E65A28' : '#15191C')}
+                            />
+                          )}
                           <polygon
-                            points={`${width / 2 + 3},3 ${width + 3},${height / 2 + 3} ${width / 2 + 3},${height + 3} 3,${height / 2 + 3}`}
-                            fill={node.shadowAccent || (isDark ? '#000000' : '#15191C')}
+                            points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`}
+                            fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : (isDark ? '#1C2226' : '#FFFFFF')}
+                            stroke={isSelected ? '#1E5C8C' : isDark ? '#E1E5E3' : '#15191C'}
+                            strokeWidth={node.borderWidth || (isSelected ? 2 : 1.5)}
+                            strokeDasharray={node.borderStyle === 'dashed' ? '5 5' : node.borderStyle === 'dotted' ? '2 2' : undefined}
                           />
-                        )}
-                        <polygon
-                          points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`}
-                          fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : (isDark ? '#1C2226' : '#FFFFFF')}
-                          stroke={isDark ? '#E1E5E3' : '#15191C'}
-                          strokeWidth="2"
-                        />
-                      </svg>
+                        </svg>
+                        <div
+                          className={`relative z-10 font-mono ${textClass} px-2.5 leading-tight ${isDark ? 'text-white' : 'text-ink'} max-w-[80px] break-words select-none pointer-events-none`}
+                          style={textStyleObj}
+                        >
+                          {node.label}
+                        </div>
+                      </div>
+                    ) : node.type === 'text' ? (
                       <div
-                        className={`relative z-10 font-mono ${fontSizeClass} px-2.5 leading-tight ${isDark ? 'text-white' : 'text-ink'} max-w-[80px] break-words select-none text-center`}
+                        className={`font-mono select-none w-full h-full flex items-center justify-center leading-normal px-2 ${textClass}`}
                         style={textStyleObj}
                       >
                         {node.label}
                       </div>
-                    </div>
-                  ) : node.type === 'table' ? (
-                    <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
-                      {/* Colored Header Banner */}
+                    ) : node.type === 'terminal' ? (
                       <div
-                        className="py-1.5 px-3 border-b-2 border-ink font-mono font-bold text-white uppercase select-none truncate text-center tracking-wider shrink-0"
-                        style={{
-                          backgroundColor: (node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#'))
-                            ? node.shadowAccent
-                            : '#1E5C8C',
-                          ...textStyleObj
-                        }}
+                        className={`font-mono ${textClass} select-none w-full truncate px-2`}
+                        style={textStyleObj}
                       >
                         {node.label}
                       </div>
-                      {/* Table Fields Body */}
-                      <div className="flex-1 p-2.5 flex flex-col gap-1.5 select-none font-mono text-[11px]">
-                        {(node.fields || []).map((f, idx) => {
-                          const parts = f.split(' ');
-                          const fieldName = parts[0] || '';
-                          const fieldType = parts.slice(1).join(' ') || '';
-                          const isPk = f.toLowerCase().includes('pk');
-                          const isFk = f.toLowerCase().includes('fk');
-                          const rawType = fieldType.replace(/\b(pk|fk)\b/gi, '').trim();
+                    ) : node.type === 'dfd-entity' ? (
+                      <div className="flex-1 flex flex-col h-full overflow-hidden select-none justify-center items-center">
+                        <div className={`absolute inset-1 border ${isDark ? 'border-[#E1E5E3]' : 'border-ink'} pointer-events-none`} />
+                        <div
+                          className={`font-mono ${textClass} px-2 select-none truncate w-full`}
+                          style={textStyleObj}
+                        >
+                          {node.label}
+                        </div>
+                      </div>
+                    ) : node.type === 'dfd-store' ? (
+                      <div
+                        className={`font-mono ${textClass} select-none h-full flex items-center justify-center px-2`}
+                        style={textStyleObj}
+                      >
+                        {node.label}
+                      </div>
+                    ) : node.type === 'dfd-process' ? (
+                      <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
+                        {(() => {
+                          const splitIdx = node.label.indexOf(' ');
+                          const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
+                          const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
                           return (
-                            <div key={idx} className={`flex justify-between items-center gap-2 border-b border-dashed ${isDark ? 'border-[#333C42]' : 'border-line'} last:border-0 pb-1`}>
-                              <span className={`font-bold truncate ${isDark ? 'text-white' : 'text-ink'}`}>{fieldName}</span>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {rawType && <span className={`${isDark ? 'text-[#9BA3A9]' : 'text-ink-soft'} text-[10px]`}>{rawType}</span>}
-                                {isPk && (
-                                  <span className="px-1 py-0.5 text-[8px] font-bold bg-blueprint text-white rounded-[2px] leading-none uppercase">
-                                    PK
-                                  </span>
-                                )}
-                                {isFk && (
-                                  <span className="px-1 py-0.5 text-[8px] font-bold border border-blueprint text-blueprint rounded-[2px] leading-none uppercase">
-                                    FK
-                                  </span>
-                                )}
+                            <>
+                              <div className={`${isDark ? 'bg-[#15191C] border-[#E1E5E3] text-[#9BA3A9]' : 'bg-paper border-ink text-ink-soft'} border-b py-1 text-center font-bold font-mono text-[9px] select-none truncate`}>
+                                {processId}
                               </div>
-                            </div>
+                              <div
+                                className={`p-2 flex-1 flex items-center justify-center ${textClass} font-mono select-none truncate leading-snug`}
+                                style={textStyleObj}
+                              >
+                                {processName}
+                              </div>
+                            </>
                           );
-                        })}
+                        })()}
                       </div>
-                    </div>
-                  ) : node.type === 'dfd-entity' ? (
-                    <div className="flex-1 flex flex-col h-full overflow-hidden select-none justify-center items-center w-full">
-                      <div className={`absolute inset-1 border ${isDark ? 'border-[#E1E5E3]' : 'border-ink'} pointer-events-none`} />
+                    ) : node.type === 'usecase-actor' ? (
+                      <div className="flex flex-col items-center justify-center w-full h-full select-none">
+                        <svg className={`w-8 h-12 ${isDark ? 'stroke-white' : 'stroke-ink'} fill-none`} strokeWidth="1.5" viewBox="0 0 24 36">
+                          <circle cx="12" cy="6" r="4" />
+                          <line x1="12" y1="10" x2="12" y2="22" />
+                          <line x1="4" y1="14" x2="20" y2="14" />
+                          <line x1="12" y1="22" x2="6" y2="32" />
+                          <line x1="12" y1="22" x2="18" y2="32" />
+                        </svg>
+                        <div
+                          className={`font-mono ${textClass} pt-1 select-none truncate w-full leading-tight`}
+                          style={textStyleObj}
+                        >
+                          {node.label}
+                        </div>
+                      </div>
+                    ) : node.type === 'usecase-oval' ? (
                       <div
-                        className={`font-mono ${fontSizeClass} px-2 select-none truncate w-full leading-normal`}
+                        className={`font-mono ${textClass} select-none w-full truncate leading-tight px-3`}
                         style={textStyleObj}
                       >
                         {node.label}
                       </div>
-                    </div>
-                  ) : node.type === 'dfd-process' ? (
-                    <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
-                      {(() => {
-                        const splitIdx = node.label.indexOf(' ');
-                        const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
-                        const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
-                        return (
-                          <>
-                            <div className={`border-b ${isDark ? 'bg-[#15191C] border-[#E1E5E3] text-[#9BA3A9]' : 'bg-paper border-ink text-ink-soft'} py-1 text-center font-bold font-mono text-[9.5px] select-none truncate`}>
-                              {processId}
-                            </div>
-                            <div
-                              className={`p-2 flex-1 flex items-center justify-center font-mono select-none truncate leading-snug`}
-                              style={textStyleObj}
-                            >
-                              {processName}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ) : node.type === 'activity-end' ? (
-                    <div className={`w-[18px] h-[18px] rounded-full ${isDark ? 'bg-white' : 'bg-ink'} select-none`} />
-                  ) : node.type === 'activity-start' || node.type === 'activity-fork' || node.type === 'sequence-activation' ? (
-                    <div className="w-full h-full select-none" />
-                  ) : node.type === 'usecase-actor' ? (
-                    <div className="flex flex-col items-center justify-center w-full h-full select-none">
-                      <svg className={`w-8 h-12 ${isDark ? 'stroke-white' : 'stroke-ink'} fill-none`} strokeWidth="1.5" viewBox="0 0 24 36">
-                        <circle cx="12" cy="6" r="4" />
-                        <line x1="12" y1="10" x2="12" y2="22" />
-                        <line x1="4" y1="14" x2="20" y2="14" />
-                        <line x1="12" y1="22" x2="6" y2="32" />
-                        <line x1="12" y1="22" x2="18" y2="32" />
-                      </svg>
+                    ) : node.type === 'usecase-boundary' ? (
+                      <div className="flex flex-col h-full w-full select-none text-left">
+                        <div
+                          className={`font-mono ${textClass} ${isDark ? 'text-[#9BA3A9]' : 'text-ink-soft'} border-b border-dashed ${isDark ? 'border-[#333C42]' : 'border-line'} pb-1 mb-1 truncate`}
+                          style={textStyleObj}
+                        >
+                          // boundary: {node.label}
+                        </div>
+                      </div>
+                    ) : node.type === 'sequence-activation' ? (
+                      <div className="absolute inset-0 bg-paper-raised pointer-events-none animate-pulse-subtle" />
+                    ) : node.type === 'table' ? (
+                      <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
+                        {/* Colored Header Banner */}
+                        <div
+                          className="py-1.5 px-3 border-b-2 border-ink font-mono font-bold text-white uppercase select-none truncate text-center tracking-wider shrink-0"
+                          style={{
+                            backgroundColor: (node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#'))
+                              ? node.shadowAccent
+                              : '#1E5C8C',
+                            ...textStyleObj
+                          }}
+                        >
+                          {node.label}
+                        </div>
+                        {/* Table Fields Body */}
+                        <div className="flex-1 p-2.5 flex flex-col gap-1.5 select-none font-mono text-[11px]">
+                          {(node.fields || []).map((f, idx) => {
+                            const parts = f.split(' ');
+                            const fieldName = parts[0] || '';
+                            const fieldType = parts.slice(1).join(' ') || '';
+                            const isPk = f.toLowerCase().includes('pk');
+                            const isFk = f.toLowerCase().includes('fk');
+                            const rawType = fieldType.replace(/\b(pk|fk)\b/gi, '').trim();
+                            return (
+                              <div key={idx} className={`flex justify-between items-center gap-2 border-b border-dashed ${isDark ? 'border-[#333C42]' : 'border-line'} last:border-0 pb-1`}>
+                                <span className={`font-bold truncate ${isDark ? 'text-white' : 'text-ink'}`}>{fieldName}</span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {rawType && <span className={`${isDark ? 'text-[#9BA3A9]' : 'text-ink-soft'} text-[10px]`}>{rawType}</span>}
+                                  {isPk && (
+                                    <span className="px-1 py-0.5 text-[8px] font-bold bg-blueprint text-white rounded-[2px] leading-none uppercase">
+                                      PK
+                                    </span>
+                                  )}
+                                  {isFk && (
+                                    <span className="px-1 py-0.5 text-[8px] font-bold border border-blueprint text-blueprint rounded-[2px] leading-none uppercase">
+                                      FK
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : node.type === 'activity-start' ? (
+                      <div className="w-full h-full select-none" />
+                    ) : node.type === 'activity-end' ? (
+                      <div className={`w-[18px] h-[18px] rounded-full ${isDark ? 'bg-white' : 'bg-ink'} select-none`} />
+                    ) : node.type === 'activity-action' ? (
                       <div
-                        className={`font-mono ${fontSizeClass} pt-1 select-none truncate w-full leading-tight text-center`}
+                        className={`font-mono ${textClass} select-none w-full truncate leading-tight px-2`}
                         style={textStyleObj}
                       >
                         {node.label}
                       </div>
-                    </div>
-                  ) : (
-                    <div
-                      className={`font-mono ${fontSizeClass} select-none w-full truncate leading-normal px-2`}
-                      style={textStyleObj}
-                    >
-                      {node.label}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    ) : node.type === 'activity-fork' ? (
+                      <div className="w-full h-full select-none" />
+                    ) : (
+                      <div
+                        className={`font-mono ${textClass} select-none h-full flex items-center justify-center px-2`}
+                        style={textStyleObj}
+                      >
+                        {node.label}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
