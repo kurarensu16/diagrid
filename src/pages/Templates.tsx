@@ -165,12 +165,12 @@ export const Templates: React.FC = () => {
       </div>
 
       {/* Tabs list with High Contrast */}
-      <div className="flex flex-wrap border-2 border-ink font-mono text-[11px] w-fit bg-paper-raised select-none shadow-hard-ink">
+      <div className="flex flex-nowrap max-w-full overflow-x-auto border-2 border-ink font-mono text-[11px] w-fit bg-paper-raised select-none shadow-hard-ink">
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
-            className={`px-4 py-2.5 border-r-2 last:border-r-0 border-ink uppercase tracking-wide transition-colors cursor-pointer font-bold ${
+            className={`px-4 py-2.5 min-h-[44px] whitespace-nowrap border-r-2 last:border-r-0 border-ink uppercase tracking-wide transition-colors cursor-pointer font-bold ${
               activeTab === tab.value 
                 ? 'bg-ink text-paper' 
                 : 'text-ink-soft hover:bg-ink hover:text-paper'
@@ -250,7 +250,7 @@ export const Templates: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setPreviewingTemplate(tmpl)}
-                  className="text-[11.5px] border border-line hover:border-ink px-2.5 py-1.5 text-ink-soft hover:text-ink transition-colors flex items-center gap-1 cursor-pointer"
+                  className="text-[11.5px] border border-line hover:border-ink px-2.5 py-1.5 min-h-[44px] text-ink-soft hover:text-ink transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   preview()
@@ -259,7 +259,7 @@ export const Templates: React.FC = () => {
                 <Button
                   variant="primary"
                   onClick={() => openUseModal(tmpl)}
-                  className="py-1.5 px-3 text-[12px] flex items-center gap-1.5 font-bold shadow-sm"
+                  className="py-1.5 px-3 min-h-[44px] text-[12px] flex items-center gap-1.5 font-bold shadow-sm"
                 >
                   use_template →
                 </Button>

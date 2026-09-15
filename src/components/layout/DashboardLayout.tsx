@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Folder, Compass, Settings, LogOut, HelpCircle, Heart } from 'lucide-react';
+import { Folder, Compass, Settings, LogOut, HelpCircle, Heart, Menu, X } from 'lucide-react';
 import { useCurrentUser } from '../../services/mockAuth';
 import { authService } from '../../services/authService';
 import { adminService } from '../../services/adminService';
@@ -16,6 +16,7 @@ export const DashboardLayout: React.FC = () => {
   const user = useCurrentUser();
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isNavOpen, setIsNavOpen] = useState(false);
   const [isSupportEnabled, setIsSupportEnabled] = useState(false);
   const [githubUrl, setGithubUrl] = useState('https://github.com/kurarensu16/diagrid');
 
@@ -46,17 +47,17 @@ export const DashboardLayout: React.FC = () => {
   return (
     <div className="h-screen flex flex-col bg-paper overflow-hidden">
       {/* Top Header navbar */}
-      <nav className="h-[64px] border-b border-line flex items-center justify-between px-8 bg-paper-raised select-none z-10">
+      <nav className="h-[64px] border-b border-line flex items-center justify-between px-4 sm:px-8 bg-paper-raised select-none z-30 shrink-0">
         <Link to="/" className="flex items-center gap-2 select-none group">
           <Logo size="md" />
         </Link>
         
-        <div className="flex items-center gap-3 font-mono text-[12px] text-ink-soft">
+        <div className="flex items-center gap-2 sm:gap-3 font-mono text-[12px] text-ink-soft">
           {/* Support Creator Pill (Red Theme) */}
           {isSupportEnabled && (
             <button
               onClick={() => setIsSupportOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-rose-500/50 hover:border-rose-600 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold transition-all cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 border border-rose-500/50 hover:border-rose-600 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold transition-all cursor-pointer"
               title="Support Diagrid Creator & Unlock Perks"
             >
               <Heart className="w-3.5 h-3.5 text-rose-600 fill-rose-600" />
@@ -71,8 +72,8 @@ export const DashboardLayout: React.FC = () => {
               title="Open Profile Settings"
             >
               <Avatar user={user} size="xs" showStatus={true} statusOnline={true} />
-              <div className="flex items-center gap-2">
-                <span className="text-ink font-bold group-hover:text-blueprint transition-colors">
+              <div className="hidden sm:flex items-center gap-2">
+                <span className="text-ink font-bold group-hover:text-blueprint transition-colors max-w-[140px] truncate">
                   {user.name || user.email.split('@')[0]}
                 </span>
 
@@ -101,13 +102,28 @@ export const DashboardLayout: React.FC = () => {
               sign_in()
             </Link>
           )}
+          <button
+            type="button"
+            onClick={() => setIsNavOpen((open) => !open)}
+            className="lg:hidden p-2 border border-line bg-paper hover:bg-paper-raised text-ink cursor-pointer"
+            aria-label={isNavOpen ? 'Close workspace navigation' : 'Open workspace navigation'}
+            aria-expanded={isNavOpen}
+          >
+            {isNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
         </div>
       </nav>
 
       {/* Main Body with Sidebar */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar Navigation */}
-        <aside className="w-[240px] border-r border-line bg-paper flex flex-col justify-between py-6 select-none overflow-hidden shrink-0">
+        {isNavOpen && (
+          <div
+            className="fixed inset-0 top-[64px] z-20 bg-ink/40 lg:hidden"
+            onClick={() => setIsNavOpen(false)}
+          />
+        )}
+        <aside className={`fixed lg:static top-[64px] bottom-0 lg:top-auto lg:bottom-auto left-0 z-20 lg:z-10 w-[min(280px,88vw)] lg:w-[240px] border-r border-line bg-paper flex flex-col justify-between py-6 select-none overflow-y-auto shrink-0 transition-transform duration-200 lg:translate-x-0 ${isNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="flex flex-col gap-1 px-4">
             <div className="font-mono text-[11px] text-blueprint tracking-wider px-3 mb-2">// workspace_nav</div>
             {menuItems.map((item) => {
@@ -117,6 +133,7 @@ export const DashboardLayout: React.FC = () => {
                 <Link
                   key={item.path}
                   to={item.path}
+                  onClick={() => setIsNavOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 font-mono text-[13px] border transition-colors ${
                     isActive
                       ? 'bg-ink text-paper border-ink'
@@ -131,7 +148,7 @@ export const DashboardLayout: React.FC = () => {
           </div>
 
           {/* Bottom sidebar actions: Support, Feedback, GitHub & Sign Out */}
-          <div className="px-4 border-t border-line pt-4 mx-4 flex flex-col gap-2">
+          <div className="px-4 border-t border-line pt-4 mx-4 mt-6 flex flex-col gap-2">
             {isSupportEnabled && (
               <button
                 onClick={() => setIsSupportOpen(true)}

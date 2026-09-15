@@ -25,7 +25,8 @@ import {
   MousePointer,
   Hand,
   PenTool,
-  Sparkles
+  Sparkles,
+  Menu,
 } from 'lucide-react';
 
 interface DemoField {
@@ -239,6 +240,7 @@ export const Landing: React.FC = () => {
 
   // Code vs Canvas preset state
   const [activeCodePreset, setActiveCodePreset] = useState<'sequence' | 'erd' | 'flowchart'>('sequence');
+  const [isNavOpen, setIsNavOpen] = useState(false);
 
   const handleStart = () => {
     if (user) {
@@ -256,8 +258,9 @@ export const Landing: React.FC = () => {
   };
 
   // Dragging event handlers for the landing page interactive mockup
-  const handleNodeMouseDown = (e: React.MouseEvent, id: string) => {
+  const handleNodePointerDown = (e: React.PointerEvent<HTMLDivElement>, id: string) => {
     e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const node = demoNodes.find((n) => n.id === id);
     if (!node) return;
     setDraggedNodeId(id);
@@ -267,7 +270,7 @@ export const Landing: React.FC = () => {
     };
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!draggedNodeId) return;
     setDemoNodes((prev) =>
       prev.map((node) => {
@@ -371,9 +374,9 @@ export const Landing: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-paper flex flex-col justify-between text-ink select-none" onMouseUp={handleMouseUp}>
+    <div className="min-h-screen bg-paper flex flex-col justify-between text-ink select-none" onPointerUp={handleMouseUp} onPointerCancel={handleMouseUp}>
       {/* 0. High-Contrast Dark Top Navbar */}
-      <nav className="flex justify-between items-center py-4 px-6 lg:px-12 border-b-2 border-ink bg-[#15191C] text-paper sticky top-0 z-40 shadow-md">
+      <nav className="relative flex justify-between items-center py-3 sm:py-4 px-4 sm:px-6 lg:px-12 border-b-2 border-ink bg-[#15191C] text-paper sticky top-0 z-40 shadow-md">
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2 select-none group text-paper hover:text-white transition-colors">
             <Logo variant="paper" size="md" />
@@ -383,7 +386,7 @@ export const Landing: React.FC = () => {
           </Link>
         </div>
 
-        <div className="hidden md:flex gap-8 text-[13px] text-[#A6B2AD] font-mono">
+        <div className="hidden lg:flex gap-8 text-[13px] text-[#A6B2AD] font-mono">
           <a href="#diagrams" className="hover:text-white transition-colors">Diagrams</a>
           <a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a>
           <a href="#code-to-diagram" className="hover:text-white transition-colors">Code to Diagram</a>
@@ -392,7 +395,7 @@ export const Landing: React.FC = () => {
           <Link to="/docs" className="hover:text-white transition-colors">Help & Docs</Link>
         </div>
 
-        <div className="flex items-center gap-3 font-mono">
+        <div className="flex items-center gap-2 sm:gap-3 font-mono">
           {user ? (
             <div className="flex items-center gap-3">
               <Link 
@@ -407,7 +410,7 @@ export const Landing: React.FC = () => {
               </Link>
               <Link 
                 to="/dashboard" 
-                className="text-[12px] border border-paper text-paper px-4 py-1.5 hover:bg-paper hover:text-ink transition-colors font-bold flex items-center gap-1.5 shadow-sm"
+                className="text-[11px] sm:text-[12px] border border-paper text-paper px-2.5 sm:px-4 py-1.5 hover:bg-paper hover:text-ink transition-colors font-bold flex items-center gap-1.5 shadow-sm"
               >
                 My Workspace
               </Link>
@@ -415,12 +418,33 @@ export const Landing: React.FC = () => {
           ) : (
             <Link 
               to="/auth" 
-              className="text-[12px] bg-blueprint text-paper border border-blueprint px-4 py-1.5 hover:bg-white hover:text-ink hover:border-white transition-colors font-bold shadow-sm"
+              className="text-[11px] sm:text-[12px] bg-blueprint text-paper border border-blueprint px-2.5 sm:px-4 py-1.5 hover:bg-white hover:text-ink hover:border-white transition-colors font-bold shadow-sm"
             >
               Sign In
             </Link>
           )}
+          <button
+            type="button"
+            onClick={() => setIsNavOpen((open) => !open)}
+            className="lg:hidden p-2 border border-[#A6B2AD] text-paper cursor-pointer"
+            aria-label={isNavOpen ? 'Close landing page navigation' : 'Open landing page navigation'}
+            aria-expanded={isNavOpen}
+          >
+            {isNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
         </div>
+        {isNavOpen && (
+          <div className="absolute top-full left-0 right-0 lg:hidden border-b-2 border-ink bg-[#15191C] px-4 py-3 shadow-md">
+            <div className="flex flex-col gap-1 text-[13px] text-[#A6B2AD] font-mono">
+              <a href="#diagrams" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">Diagrams</a>
+              <a href="#how-it-works" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">How It Works</a>
+              <a href="#code-to-diagram" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">Code to Diagram</a>
+              <a href="#comparison" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">Why Diagrid?</a>
+              <Link to="/templates" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">Templates</Link>
+              <Link to="/docs" onClick={() => setIsNavOpen(false)} className="px-3 py-3 hover:bg-white/10 hover:text-white">Help & Docs</Link>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* 1. Hero Section in Plain English */}
@@ -441,10 +465,10 @@ export const Landing: React.FC = () => {
             Create clean database plans, step-by-step flowcharts, and system maps in the Diagrid Studio. Drag boxes, connect lines, and download your image — without fighting complicated tools.
           </p>
 
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
             <button
               onClick={handleStart}
-              className="bg-ink text-paper border-2 border-ink px-6 py-3 font-mono text-[13.5px] hover:bg-blueprint hover:border-blueprint transition-colors active:translate-y-[1px] shadow-hard-blueprint flex items-center gap-2 cursor-pointer font-bold"
+              className="bg-ink text-paper border-2 border-ink px-6 py-3 font-mono text-[13.5px] hover:bg-blueprint hover:border-blueprint transition-colors active:translate-y-[1px] shadow-hard-blueprint flex items-center justify-center gap-2 cursor-pointer font-bold"
             >
               Start Drawing Free
               <ArrowRight className="w-4 h-4" />
@@ -475,7 +499,7 @@ export const Landing: React.FC = () => {
         </div>
 
         {/* Right demo column: Authentic Diagrid Canvas Studio */}
-        <div className="bg-[#EAEFEA] p-6 sm:p-8 lg:p-12 flex flex-col justify-center select-none relative border-b-2 lg:border-b-0 border-ink">
+        <div className="bg-[#EAEFEA] p-4 sm:p-8 lg:p-12 flex flex-col justify-center select-none relative border-b-2 lg:border-b-0 border-ink">
           <div className="border-2 border-ink flex flex-col bg-paper-raised shadow-hard-blueprint max-w-[580px] mx-auto w-full overflow-hidden">
             {/* Editor Window Chrome */}
             <div className="h-9 border-b-2 border-ink bg-[#15191C] text-paper px-3.5 flex items-center justify-between font-mono text-[11px] select-none">
@@ -521,7 +545,7 @@ export const Landing: React.FC = () => {
             {/* Split layout: Template starters on left, Real Canvas on right */}
             <div className="flex overflow-hidden min-h-[350px]">
               {/* Mini Palette Sidebar */}
-              <div className="w-[125px] border-r-2 border-ink bg-[#F1F4F1] p-2.5 flex flex-col gap-2 shrink-0">
+              <div className="w-[96px] sm:w-[125px] border-r-2 border-ink bg-[#F1F4F1] p-2.5 flex flex-col gap-2 shrink-0">
                 <div className="font-mono text-[9px] text-blueprint uppercase tracking-wider mb-0.5 font-bold flex items-center gap-1">
                   <Sparkles className="w-2.5 h-2.5" />
                   <span>Templates</span>
@@ -565,8 +589,8 @@ export const Landing: React.FC = () => {
 
               {/* Realistic Diagrid Canvas Area */}
               <div
-                onMouseMove={handleCanvasMouseMove}
-                className="flex-1 bg-grid relative p-4 overflow-hidden cursor-crosshair bg-paper"
+                onPointerMove={handleCanvasPointerMove}
+                className="flex-1 bg-grid relative p-4 overflow-hidden cursor-crosshair bg-paper touch-none"
               >
                 {/* SVG connection lines with Orthogonal routing & Crow's foot markers */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
@@ -798,7 +822,7 @@ export const Landing: React.FC = () => {
                   return (
                     <div
                       key={node.id}
-                      onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                      onPointerDown={(e) => handleNodePointerDown(e, node.id)}
                       style={{
                         left: `${node.x}px`,
                         top: `${node.y}px`,
@@ -918,7 +942,7 @@ export const Landing: React.FC = () => {
       </div>
 
       {/* 3. Supported Diagrams Showcase (8 Types in Plain English) */}
-      <section id="diagrams" className="p-8 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
+      <section id="diagrams" className="p-4 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
         <div className="max-w-6xl mx-auto flex flex-col gap-8">
           {/* Section Header */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-2 border-ink pb-6">
@@ -1022,7 +1046,7 @@ export const Landing: React.FC = () => {
       {/* 4. "How Diagrid Works" — 3 Simple Steps */}
       <section id="how-it-works" className="border-b-2 border-ink bg-paper-raised">
         <div className="max-w-6xl mx-auto">
-          <div className="p-8 sm:p-12 border-b-2 border-ink">
+          <div className="p-6 sm:p-12 border-b-2 border-ink">
             <div className="font-mono text-[11px] text-blueprint uppercase tracking-wider mb-1 font-bold">
               Simple 3-Step Process
             </div>
@@ -1093,7 +1117,7 @@ export const Landing: React.FC = () => {
       </section>
 
       {/* 5. Code & Notes to Diagram Compiler */}
-      <section id="code-to-diagram" className="p-8 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
+      <section id="code-to-diagram" className="p-4 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
         <div className="max-w-6xl mx-auto flex flex-col gap-8">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-2 border-ink pb-6">
             <div>
@@ -1200,7 +1224,7 @@ export const Landing: React.FC = () => {
       </section>
 
       {/* 6. Comparison Table in Plain English */}
-      <section id="comparison" className="p-8 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper-raised">
+      <section id="comparison" className="p-4 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper-raised">
         <div className="max-w-6xl mx-auto flex flex-col gap-8">
           <div>
             <div className="font-mono text-[11px] text-blueprint uppercase tracking-wider mb-1 font-bold">
@@ -1312,8 +1336,8 @@ export const Landing: React.FC = () => {
       </section>
 
       {/* 7. Bottom Call-to-Action (CTA) Banner in Plain English */}
-      <section className="p-8 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
-        <div className="max-w-4xl mx-auto border-2 border-ink bg-[#15191C] text-paper p-8 sm:p-12 shadow-hard-blueprint flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+      <section className="p-4 sm:p-12 lg:p-16 border-b-2 border-ink bg-paper">
+        <div className="max-w-4xl mx-auto border-2 border-ink bg-[#15191C] text-paper p-6 sm:p-12 shadow-hard-blueprint flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
           <div className="flex flex-col gap-2">
             <span className="font-mono text-[11px] text-signal uppercase tracking-wider font-bold">
               Ready to draw?
@@ -1345,7 +1369,7 @@ export const Landing: React.FC = () => {
       </section>
 
       {/* 8. High-Contrast Dark Footer */}
-      <footer className="py-8 px-8 lg:px-12 flex flex-col sm:flex-row justify-between items-center gap-4 font-mono text-[12px] bg-[#101417] text-[#9AA5A0] border-t-2 border-ink">
+      <footer className="py-6 sm:py-8 px-4 sm:px-8 lg:px-12 flex flex-col sm:flex-row justify-between items-center gap-4 font-mono text-[12px] bg-[#101417] text-[#9AA5A0] border-t-2 border-ink">
         <div className="flex items-center gap-3">
           <Logo variant="paper" size="sm" />
           <span className="font-mono text-[9px] tracking-[0.18em] text-blueprint border-l border-[#2D363C] pl-2">

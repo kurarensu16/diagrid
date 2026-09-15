@@ -511,6 +511,13 @@ export const Editor: React.FC = () => {
   const [leftSidebarTab, setLeftSidebarTab] = useState<'toolbox' | 'code'>('toolbox');
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
 
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      setIsSidebarOpen(false);
+      setIsRightSidebarOpen(false);
+    }
+  }, []);
+
   // Code to Diagram editor state
   const [codeTabSubmode, setCodeTabSubmode] = useState<'import' | 'export'>('import');
   const [codeText, setCodeText] = useState(CODE_PRESETS_LIST[0].code);

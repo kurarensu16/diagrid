@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Landing } from './pages/Landing';
 import { Auth } from './pages/Auth';
@@ -22,6 +22,7 @@ import { authService } from './services/authService';
 import { themeService } from './services/themeService';
 import { Avatar } from './components/ui/Avatar';
 import { Logo } from './components/ui/Logo';
+import { Menu, X } from 'lucide-react';
 
 // Global theme sync handler: Keeps landing and public pages in classic blueprint mode, and applies user theme only to app workspace routes
 const ThemeSyncHandler: React.FC = () => {
@@ -123,14 +124,15 @@ const PublicAppLayout = () => {
 
   const isTemplates = location.pathname === '/templates';
   const isDocs = location.pathname === '/docs';
+  const [isNavOpen, setIsNavOpen] = useState(false);
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-paper text-ink select-none">
-      <nav className="flex justify-between items-center py-4 px-8 lg:px-12 border-b-2 border-ink bg-[#15191C] text-paper sticky top-0 z-30 shadow-md">
+      <nav className="relative flex justify-between items-center py-3 sm:py-4 px-4 sm:px-8 lg:px-12 border-b-2 border-ink bg-[#15191C] text-paper sticky top-0 z-30 shadow-md">
         <Link to="/" className="flex items-center gap-2 text-paper hover:text-white transition-colors group">
           <Logo variant="paper" size="md" />
         </Link>
-        <div className="flex gap-8 text-[13px] text-[#A6B2AD] font-mono">
+        <div className="hidden md:flex gap-8 text-[13px] text-[#A6B2AD] font-mono">
           <Link to="/templates" className={`${isTemplates ? 'text-white font-bold' : 'hover:text-white transition-colors'}`}>
             // templates
           </Link>
@@ -153,21 +155,39 @@ const PublicAppLayout = () => {
             </Link>
             <Link 
               to={user.role === 'admin' ? "/admin" : "/dashboard"} 
-              className="font-mono text-[12px] border border-paper text-paper px-4 py-1.5 hover:bg-paper hover:text-ink transition-colors font-bold"
+              className="font-mono text-[11px] sm:text-[12px] border border-paper text-paper px-2.5 sm:px-4 py-1.5 hover:bg-paper hover:text-ink transition-colors font-bold"
             >
               {user.role === 'admin' ? 'admin_portal()' : 'dashboard()'}
             </Link>
           </div>
         ) : (
-          <Link to="/auth" className="font-mono text-[12px] bg-blueprint text-paper border border-blueprint px-4 py-1.5 hover:bg-white hover:text-ink hover:border-white transition-colors font-bold">
+          <Link to="/auth" className="font-mono text-[11px] sm:text-[12px] bg-blueprint text-paper border border-blueprint px-2.5 sm:px-4 py-1.5 hover:bg-white hover:text-ink hover:border-white transition-colors font-bold">
             sign_in()
           </Link>
+        )}
+        <button
+          type="button"
+          onClick={() => setIsNavOpen((open) => !open)}
+          className="md:hidden p-2 border border-[#A6B2AD] text-paper cursor-pointer"
+          aria-label={isNavOpen ? 'Close site navigation' : 'Open site navigation'}
+          aria-expanded={isNavOpen}
+        >
+          {isNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+        </button>
+        {isNavOpen && (
+          <div className="absolute top-full left-0 right-0 md:hidden border-b-2 border-ink bg-[#15191C] px-4 py-3 shadow-md">
+            <div className="flex flex-col gap-1 text-[13px] text-[#A6B2AD] font-mono">
+              <Link onClick={() => setIsNavOpen(false)} to="/templates" className="px-3 py-3 hover:bg-white/10 hover:text-white">// templates</Link>
+              <Link onClick={() => setIsNavOpen(false)} to="/docs" className="px-3 py-3 hover:bg-white/10 hover:text-white">// docs</Link>
+              <Link onClick={() => setIsNavOpen(false)} to="/" className="px-3 py-3 hover:bg-white/10 hover:text-white">// home</Link>
+            </div>
+          </div>
         )}
       </nav>
       <main className="flex-1 flex flex-col overflow-hidden">
         <Outlet />
       </main>
-      <footer className="py-7 px-12 flex justify-between font-mono text-[12px] text-[#9AA5A0] bg-[#101417] border-t-2 border-ink shrink-0">
+      <footer className="py-5 sm:py-7 px-4 sm:px-12 flex flex-col sm:flex-row gap-2 sm:gap-0 sm:justify-between font-mono text-[11px] sm:text-[12px] text-[#9AA5A0] bg-[#101417] border-t-2 border-ink shrink-0">
         <span className="text-white font-bold">diagrid — build_v0.1</span>
         <span>made for people who'd rather drag than type</span>
       </footer>
