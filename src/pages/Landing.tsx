@@ -377,10 +377,10 @@ export const Landing: React.FC = () => {
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2 select-none group text-paper hover:text-white transition-colors">
             <Logo variant="paper" size="md" />
+            <span className="font-mono text-[10px] tracking-[0.18em] text-blueprint border-l border-[#2D363C] pl-2">
+              STUDIO
+            </span>
           </Link>
-          <span className="font-mono text-[10px] border border-[#2D363C] px-2 py-0.5 text-[#9AA5A0] uppercase tracking-wider hidden sm:inline-block bg-[#1B2125]">
-            Simple Diagram Maker
-          </span>
         </div>
 
         <div className="hidden md:flex gap-8 text-[13px] text-[#A6B2AD] font-mono">
@@ -438,7 +438,7 @@ export const Landing: React.FC = () => {
           </h1>
 
           <p className="text-[15.5px] sm:text-[16.5px] text-[#2C3439] leading-relaxed max-w-[490px] mb-8 font-sans font-medium">
-            Create clean database plans, step-by-step flowcharts, and system maps that snap neatly into place. Just drag boxes, connect lines, and download your image — without fighting complicated tools.
+            Create clean database plans, step-by-step flowcharts, and system maps in the Diagrid Studio. Drag boxes, connect lines, and download your image — without fighting complicated tools.
           </p>
 
           <div className="flex flex-wrap items-center gap-4">
@@ -1348,6 +1348,9 @@ export const Landing: React.FC = () => {
       <footer className="py-8 px-8 lg:px-12 flex flex-col sm:flex-row justify-between items-center gap-4 font-mono text-[12px] bg-[#101417] text-[#9AA5A0] border-t-2 border-ink">
         <div className="flex items-center gap-3">
           <Logo variant="paper" size="sm" />
+          <span className="font-mono text-[9px] tracking-[0.18em] text-blueprint border-l border-[#2D363C] pl-2">
+            STUDIO
+          </span>
           <span>•</span>
           <span>Made for people who want neat diagrams without the hassle.</span>
         </div>

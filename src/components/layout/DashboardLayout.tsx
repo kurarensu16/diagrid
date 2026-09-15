@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Folder, Compass, Settings, LogOut, HelpCircle, Heart } from 'lucide-react';
-import { mockAuth, useCurrentUser } from '../../services/mockAuth';
+import { useCurrentUser } from '../../services/mockAuth';
+import { authService } from '../../services/authService';
 import { adminService } from '../../services/adminService';
 import { Avatar } from '../ui/Avatar';
 import { Logo } from '../ui/Logo';
@@ -31,8 +32,8 @@ export const DashboardLayout: React.FC = () => {
     return () => window.removeEventListener('online', retryWhenOnline);
   }, []);
 
-  const handleLogout = () => {
-    mockAuth.logout();
+  const handleLogout = async () => {
+    await authService.signOut();
     navigate('/');
   };
 
