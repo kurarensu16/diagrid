@@ -258,7 +258,6 @@ export const Settings: React.FC = () => {
 
   const handleLogout = async () => {
     await authService.signOut();
-    mockAuth.logout();
     navigate('/');
   };
 

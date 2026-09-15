@@ -263,10 +263,12 @@ export const authService = {
   },
 
   signOut: async (): Promise<void> => {
+    // Clear the local cache first so every subscribed view updates immediately,
+    // even if the remote Supabase sign-out takes time or fails.
+    setCachedUser(null);
     if (isSupabaseConfigured()) {
       await supabase.auth.signOut();
     }
-    setCachedUser(null);
   },
 
   updateProfile: async (updates: Partial<AuthUser>): Promise<{ user: AuthUser | null; error?: string }> => {
