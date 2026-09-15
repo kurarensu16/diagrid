@@ -9,7 +9,9 @@ import {
   ArrowLeft, 
   LogOut,
   ShieldAlert,
-  MessageSquare
+  MessageSquare,
+  Menu,
+  X
 } from 'lucide-react';
 import { mockAuth, useCurrentUser } from '../../services/mockAuth';
 import { Avatar } from '../ui/Avatar';
@@ -19,6 +21,7 @@ export const AdminLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useCurrentUser();
+  const [isNavOpen, setIsNavOpen] = React.useState(false);
 
   const handleLogout = () => {
     mockAuth.logout();
@@ -37,18 +40,18 @@ export const AdminLayout: React.FC = () => {
   return (
     <div className="h-screen flex flex-col bg-paper overflow-hidden text-ink">
       {/* Admin Top Navbar Header */}
-      <nav className="h-[64px] border-b border-line flex items-center justify-between px-8 bg-paper-raised select-none z-10">
+      <nav className="h-[64px] border-b border-line flex items-center justify-between px-4 sm:px-8 bg-paper-raised select-none z-30 shrink-0">
         <div className="flex items-center gap-3">
           <Link to="/admin" className="flex items-center gap-2 select-none group">
             <Logo size="md" />
           </Link>
-          <span className="font-mono text-[10px] text-signal border border-signal px-1.5 py-0.5 uppercase tracking-wider font-bold flex items-center gap-1 animate-pulse">
+          <span className="hidden sm:flex font-mono text-[10px] text-signal border border-signal px-1.5 py-0.5 uppercase tracking-wider font-bold items-center gap-1 animate-pulse">
             <ShieldAlert className="w-3 h-3" />
             admin_console
           </span>
         </div>
         
-        <div className="flex items-center gap-5 font-mono text-[12px] text-ink-soft">
+        <div className="flex items-center gap-2 sm:gap-5 font-mono text-[12px] text-ink-soft">
           {user && (
             <Link
               to="/settings"
@@ -56,7 +59,7 @@ export const AdminLayout: React.FC = () => {
               title="Admin Profile Settings"
             >
               <Avatar user={user} size="xs" showStatus={true} statusOnline={true} />
-              <span className="text-ink font-bold group-hover:text-signal transition-colors">
+              <span className="hidden sm:inline text-ink font-bold group-hover:text-signal transition-colors max-w-[140px] truncate">
                 {user.name || user.email.split('@')[0]}
               </span>
               <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 border border-signal text-signal bg-signal/5">
@@ -73,13 +76,28 @@ export const AdminLayout: React.FC = () => {
             <ArrowLeft className="w-3.5 h-3.5" />
             view_site()
           </Link>
+          <button
+            type="button"
+            onClick={() => setIsNavOpen((open) => !open)}
+            className="lg:hidden p-2 border border-line bg-paper hover:bg-paper-raised text-ink cursor-pointer"
+            aria-label={isNavOpen ? 'Close admin navigation' : 'Open admin navigation'}
+            aria-expanded={isNavOpen}
+          >
+            {isNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
         </div>
       </nav>
 
       {/* Main split grid */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar Nav */}
-        <aside className="w-[240px] border-r border-line bg-paper flex flex-col justify-between py-6 select-none overflow-hidden shrink-0">
+        {isNavOpen && (
+          <div
+            className="fixed inset-0 top-[64px] z-20 bg-ink/40 lg:hidden"
+            onClick={() => setIsNavOpen(false)}
+          />
+        )}
+        <aside className={`fixed lg:static top-[64px] bottom-0 lg:top-auto lg:bottom-auto left-0 z-20 lg:z-10 w-[min(280px,88vw)] lg:w-[240px] border-r border-line bg-paper flex flex-col justify-between py-6 select-none overflow-y-auto shrink-0 transition-transform duration-200 lg:translate-x-0 ${isNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="flex flex-col gap-1 px-4">
             <div className="font-mono text-[11px] text-signal tracking-wider px-3 mb-2">// admin_nav</div>
             {adminMenuItems.map((item) => {
@@ -89,6 +107,7 @@ export const AdminLayout: React.FC = () => {
                 <Link
                   key={item.path}
                   to={item.path}
+                  onClick={() => setIsNavOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 font-mono text-[13px] border transition-colors ${
                     isActive
                       ? 'bg-ink text-paper border-ink shadow-hard-signal'
@@ -102,7 +121,7 @@ export const AdminLayout: React.FC = () => {
             })}
           </div>
 
-          <div className="px-4 border-t border-line pt-4 mx-4 flex flex-col gap-2">
+          <div className="px-4 border-t border-line pt-4 mx-4 mt-6 flex flex-col gap-2">
             <a
               href="https://github.com/kurarensu16/diagrid"
               target="_blank"
@@ -131,4 +150,3 @@ export const AdminLayout: React.FC = () => {
     </div>
   );
 };
-

@@ -145,7 +145,7 @@
   }
 
   /* Isolated Diagram Canvas: Diagrams always maintain clean drafting paper and dark ink colors regardless of UI theme */
-  .diagram-canvas {
+.diagram-canvas {
     --bg-paper: #F6F7F5;
     --bg-paper-raised: #FFFFFF;
     --text-ink: #15191C;
@@ -161,6 +161,8 @@
     --card-shadow-ink: #15191C;
     background-color: #FFFFFF !important;
     color: #15191C !important;
+    touch-action: none;
+    overscroll-behavior: none;
   }
 }
 
