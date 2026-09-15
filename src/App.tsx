@@ -29,8 +29,8 @@ const ThemeSyncHandler: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    themeService.applyCurrentRouteTheme(user?.theme);
-  }, [user?.theme, location.pathname]);
+    themeService.applyCurrentRouteTheme(user?.theme, Boolean(user));
+  }, [user, user?.theme, location.pathname]);
 
   return null;
 };

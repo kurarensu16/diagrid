@@ -2,6 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+.docs-layout {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: calc(100dvh - 132px);
+}
+
+.docs-sidebar {
+  min-width: 0;
+  border-bottom: 1px solid var(--border-line);
+}
+
+.docs-topic-nav {
+  overflow-x: auto;
+}
+
+.docs-article {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  .docs-layout { flex-direction: row; }
+  .docs-sidebar {
+    flex: 0 0 280px;
+    width: 280px;
+    border-right: 1px solid var(--border-line);
+    border-bottom: 0;
+    overflow-y: auto;
+  }
+  .docs-topic-nav { overflow-x: visible; }
+}
+
 :root,
 [data-theme="blueprint"] {
   --bg-paper: #F6F7F5;
@@ -261,4 +298,3 @@
   left: -4px;
   cursor: w-resize;
 }
-

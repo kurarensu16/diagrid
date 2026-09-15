@@ -34,10 +34,12 @@ import { authService } from '../services/authService';
 import { adminService } from '../services/adminService';
 import { storageService } from '../services/storageService';
 import { themeService } from '../services/themeService';
+import { cloudSaveStatus } from '../services/cloudSaveStatus';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
+  const lastConfirmedAccountSave = cloudSaveStatus.getLastConfirmedSave(currentUser?.id);
 
   // Edit mode state: default is false (read-only view mode)
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -77,7 +79,7 @@ export const Settings: React.FC = () => {
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
-  const [isSupportEnabled, setIsSupportEnabled] = useState(true);
+  const [isSupportEnabled, setIsSupportEnabled] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1113,12 +1115,11 @@ export const Settings: React.FC = () => {
                 <span className="col-span-2 text-ink">~{storageUsageKb} KB stored in browser</span>
               </div>
               <div className="grid grid-cols-3 border-b border-line pb-2.5">
-                <span className="text-ink-soft">BACKEND_PROVIDER:</span>
-                <span className="col-span-2 flex items-center gap-1.5 font-bold">
-                  <span className={`w-2 h-2 rounded-full ${authService.isConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                  <span className={authService.isConfigured() ? 'text-emerald-700' : 'text-amber-800'}>
-                    {authService.isConfigured() ? 'Supabase Cloud Connected' : 'Supabase Not Configured (set .env)'}
-                  </span>
+                <span className="text-ink-soft">Last account save:</span>
+                <span className="col-span-2 text-ink">
+                  {lastConfirmedAccountSave
+                    ? new Date(lastConfirmedAccountSave).toLocaleString()
+                    : 'No confirmed save on this device yet'}
                 </span>
               </div>
               <div className="grid grid-cols-3">

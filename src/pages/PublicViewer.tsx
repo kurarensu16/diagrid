@@ -6,7 +6,7 @@ import { useCurrentUser } from '../services/mockAuth';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../services/mockDb';
 import { type FreehandDrawing, getNodeDimensions } from '../utils/diagramExport';
 import { decodeSharePayload } from '../utils/shareUtils';
-import { getPortCoords, calculateEdgePath } from '../utils/edgeRouting';
+import { calculateEdgePath, getEdgeLabelPosition } from '../utils/edgeRouting';
 import { ExportModal } from '../components/canvas/ExportModal';
 import { ShareModal } from '../components/canvas/ShareModal';
 import { Logo } from '../components/ui/Logo';
@@ -620,16 +620,8 @@ export const PublicViewer: React.FC = () => {
                 const path = calculateEdgePath(edge, nodes);
                 if (!path) return null;
 
-                const srcNode = nodes.find(n => n.id === edge.source);
-                const tgtNode = nodes.find(n => n.id === edge.target);
-                let labelX = 0;
-                let labelY = 0;
-                if (srcNode && tgtNode) {
-                  const start = getPortCoords(srcNode, edge.sourceHandle || 'right');
-                  const end = getPortCoords(tgtNode, edge.targetHandle || 'left');
-                  labelX = (start.x + end.x) / 2;
-                  labelY = (start.y + end.y) / 2 - 8;
-                }
+                const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
+                const labelY = routeLabelY - 8;
 
                 const markerStartUrl = getMarkerUrl(edge.sourceMarker, edge.arrow, true, false);
                 const markerEndUrl = getMarkerUrl(edge.targetMarker, edge.arrow, false, false);
@@ -705,7 +697,7 @@ export const PublicViewer: React.FC = () => {
                   : "bg-paper-raised text-ink border-ink flex flex-col justify-between p-4";
 
                 if (isDiamond) {
-                  shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 relative shadow-none";
+                  shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 shadow-none";
                 } else if (node.type === 'text') {
                   shapeClasses = "bg-transparent flex items-center justify-center p-2";
                 } else if (node.type === 'table') {
@@ -720,8 +712,8 @@ export const PublicViewer: React.FC = () => {
                     : "border-y border-x-0 border-ink bg-paper-raised flex flex-col justify-center p-2";
                 } else if (node.type === 'dfd-entity') {
                   shapeClasses = isDark
-                    ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-between p-4 relative"
-                    : "border-ink bg-paper-raised flex flex-col justify-between p-4 relative";
+                    ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-between p-4"
+                    : "border-ink bg-paper-raised flex flex-col justify-between p-4";
                 } else if (node.type === 'dfd-process') {
                   shapeClasses = isDark
                     ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col p-0"

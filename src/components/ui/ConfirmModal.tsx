@@ -29,11 +29,13 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 }) => {
   const [matchInput, setMatchInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setMatchInput('');
       setIsProcessing(false);
+      setErrorMessage('');
     }
   }, [isOpen]);
 
@@ -57,11 +59,13 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   const handleConfirmClick = async () => {
     if (isConfirmDisabled || isProcessing) return;
     setIsProcessing(true);
+    setErrorMessage('');
     try {
       await onConfirm();
       onClose();
     } catch (err) {
       console.error('[ConfirmModal] Error during confirm action:', err);
+      setErrorMessage(err instanceof Error ? err.message : 'Could not complete this action. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -110,6 +114,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 )}
               </div>
             </div>
+
+            {errorMessage && <p role="alert" className="text-[12px] text-signal font-mono">{errorMessage}</p>}
 
             {/* Type-to-confirm requirement if specified */}
             {requireMatchString && (

@@ -40,18 +40,18 @@ type FeedbackType = 'feature' | 'bug' | 'general';
 type FeedbackPriority = 'low' | 'medium' | 'high' | 'critical';
 
 const CSAT_RATINGS = [
-  { score: 1, label: 'Very Dissatisfied', color: 'text-signal bg-signal/10 border-signal' },
-  { score: 2, label: 'Dissatisfied', color: 'text-amber-700 bg-amber-500/10 border-amber-600' },
-  { score: 3, label: 'Neutral', color: 'text-ink-soft bg-paper-raised border-line' },
-  { score: 4, label: 'Satisfied', color: 'text-blueprint bg-blueprint/10 border-blueprint' },
-  { score: 5, label: 'Very Satisfied', color: 'text-emerald-700 bg-emerald-500/10 border-emerald-600' },
+  { score: 1, label: 'Very unhappy', color: 'text-signal bg-signal/10 border-signal' },
+  { score: 2, label: 'Unhappy', color: 'text-amber-700 bg-amber-500/10 border-amber-600' },
+  { score: 3, label: 'Okay', color: 'text-ink-soft bg-paper-raised border-line' },
+  { score: 4, label: 'Happy', color: 'text-blueprint bg-blueprint/10 border-blueprint' },
+  { score: 5, label: 'Very happy', color: 'text-emerald-700 bg-emerald-500/10 border-emerald-600' },
 ];
 
 const SEVERITY_OPTIONS: { value: FeedbackPriority; label: string; desc: string; color: string }[] = [
-  { value: 'low', label: 'Low', desc: 'Cosmetic / minor nuance', color: 'border-line text-ink-soft' },
-  { value: 'medium', label: 'Medium', desc: 'Workaround available', color: 'border-blueprint text-blueprint' },
-  { value: 'high', label: 'High', desc: 'Feature unusable / broken', color: 'border-amber-600 text-amber-700' },
-  { value: 'critical', label: 'Critical', desc: 'Data loss or crash', color: 'border-signal text-signal bg-signal/5' },
+  { value: 'low', label: 'Small issue', desc: 'Looks wrong, but still works', color: 'border-line text-ink-soft' },
+  { value: 'medium', label: 'Some trouble', desc: 'I can still use the app', color: 'border-blueprint text-blueprint' },
+  { value: 'high', label: 'Big problem', desc: 'I cannot use this feature', color: 'border-amber-600 text-amber-700' },
+  { value: 'critical', label: 'Cannot use app', desc: 'The app crashes or I lost work', color: 'border-signal text-signal bg-signal/5' },
 ];
 
 // Helper to detect simple browser and OS metadata
@@ -169,7 +169,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
     if (!message.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-    setStatusMessage('Capturing diagnostics & uploading...');
+    setStatusMessage('Sending your feedback...');
 
     try {
       let attachmentUrl: string | undefined = undefined;
@@ -187,7 +187,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
       const clientTelemetry = includeTelemetry ? getClientTelemetry(diagramContext) : undefined;
       const effectiveEmail = userEmail.trim() || user?.email || 'anonymous@diagrid.dev';
 
-      await adminService.submitFeedback({
+      const result = await adminService.submitFeedback({
         userEmail: effectiveEmail,
         type,
         rating,
@@ -198,6 +198,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
         attachmentUrl,
         priority: type === 'bug' ? priority : 'medium',
       });
+      if (result.error) throw new Error(result.error);
 
       setIsSubmitting(false);
       setSubmitted(true);
@@ -209,7 +210,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
       }, 1600);
     } catch (err: any) {
       console.error('[FeedbackModal] Error submitting feedback:', err);
-      setStatusMessage('Submission error. Please retry.');
+      setStatusMessage('Your feedback was not sent. Please try again.');
       setIsSubmitting(false);
     }
   };
@@ -233,10 +234,10 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             <HelpCircle className="w-5 h-5 text-blueprint" />
             <div>
               <h2 className="font-mono text-[15px] font-bold tracking-tight text-ink">
-                feedback_and_diagnostics
+                Share feedback
               </h2>
               <p className="font-mono text-[11px] text-ink-soft">
-                // developer telemetry & diagnostic support hub
+                Tell us what you think or ask for help
               </p>
             </div>
           </div>
@@ -254,9 +255,9 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             <div className="w-12 h-12 border border-emerald-600 bg-emerald-500/10 text-emerald-700 flex items-center justify-center">
               <Check className="w-6 h-6" />
             </div>
-            <h3 className="font-bold text-lg text-ink">feedback_received()</h3>
+            <h3 className="font-bold text-lg text-ink">Thanks for your feedback!</h3>
             <p className="text-xs text-ink-soft max-w-sm">
-              Thank you! Your feedback, diagnostic telemetry, and attachments have been received and queued for review.
+              We received your message and will review it.
             </p>
           </div>
         ) : (
@@ -264,7 +265,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             {/* Category Selector */}
             <div className="flex flex-col gap-1.5">
               <label className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink">
-                submission_category:
+                What is this about?
               </label>
               <div className="grid grid-cols-3 gap-2 font-mono text-[12px]">
                 <button
@@ -277,7 +278,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   }`}
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                  General
+                  General feedback
                 </button>
                 <button
                   type="button"
@@ -289,7 +290,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  Feature Idea
+                  Suggest an idea
                 </button>
                 <button
                   type="button"
@@ -301,7 +302,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   }`}
                 >
                   <Bug className="w-3.5 h-3.5" />
-                  Bug Report
+                  Report a problem
                 </button>
               </div>
             </div>
@@ -312,11 +313,8 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                 <div className="flex items-center justify-between">
                   <label className="font-mono text-[11px] font-bold uppercase tracking-wider text-signal flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    bug_severity_level:
+                    How much is this affecting you?
                   </label>
-                  <span className="font-mono text-[10px] text-ink-soft uppercase font-bold">
-                    [{priority}]
-                  </span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 font-mono text-[11px]">
                   {SEVERITY_OPTIONS.map((opt) => (
@@ -333,7 +331,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                     >
                       <span>{opt.label}</span>
                       <span className={`text-[9px] ${priority === opt.value ? 'text-paper-raised' : 'text-ink-soft'}`}>
-                        {opt.desc.split(' ')[0]}
+                        {opt.desc}
                       </span>
                     </button>
                   ))}
@@ -345,7 +343,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             <div className="flex flex-col gap-2 p-3 border border-line bg-paper-raised/40">
               <div className="flex items-center justify-between">
                 <label className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink">
-                  overall_experience_rating (csat):
+                  How has your experience been?
                 </label>
                 <span className={`font-mono text-[11px] font-bold px-2 py-0.5 border ${currentRatingInfo.color}`}>
                   {currentScore}/5 • {currentRatingInfo.label}
@@ -382,8 +380,8 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                 </div>
 
                 <div className="flex flex-col items-end font-mono text-[10px] text-ink-soft">
-                  <span>1: Dissatisfied</span>
-                  <span>5: Very Satisfied</span>
+                  <span>1: Very unhappy</span>
+                  <span>5: Very happy</span>
                 </div>
               </div>
             </div>
@@ -391,8 +389,8 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             {/* Contact Email input */}
             <div className="flex flex-col gap-1">
               <label className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink flex items-center justify-between">
-                <span>contact_email:</span>
-                <span className="text-[10px] text-ink-soft font-normal">(for engineering reply & triage updates)</span>
+                <span>Your email (optional)</span>
+                <span className="text-[10px] text-ink-soft font-normal">So we can reply if needed</span>
               </label>
               <input
                 type="email"
@@ -406,7 +404,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             {/* Message input */}
             <div className="flex flex-col gap-1">
               <label className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink">
-                detailed_notes_and_context:
+                Tell us more
               </label>
               <textarea
                 rows={3}
@@ -414,10 +412,10 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder={
                   type === 'bug'
-                    ? 'Describe what happened, what was expected, and reproduction steps...'
+                    ? 'What went wrong? What were you trying to do?'
                     : type === 'feature'
-                    ? 'What capability or notation standard would make Diagrid your daily driver?'
-                    : 'Share your thoughts, suggestions, or general impressions...'
+                    ? 'What would you like to be able to do?'
+                    : 'Tell us what you think or how we can help...'
                 }
                 required
                 className="font-mono text-[12px] p-2.5 bg-paper border border-line text-ink focus:outline-none focus:border-ink transition-colors resize-none"
@@ -429,10 +427,10 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
               <div className="flex items-center justify-between font-mono text-[11px] font-bold text-ink">
                 <span className="flex items-center gap-1.5">
                   <Paperclip className="w-3.5 h-3.5 text-blueprint" />
-                  screenshot_attachment:
+                  Add a screenshot (optional)
                 </span>
                 <span className="text-[10px] text-ink-soft font-normal">
-                  (or press <kbd className="px-1 py-0.5 border border-line bg-paper-raised text-ink">Ctrl+V</kbd> to paste image)
+                  (or press <kbd className="px-1 py-0.5 border border-line bg-paper-raised text-ink">Ctrl+V</kbd> to paste one)
                 </span>
               </div>
 
@@ -475,7 +473,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                     className="flex-1 border border-dashed border-line hover:border-ink py-2 px-3 text-center font-mono text-[11px] text-ink-soft hover:text-ink bg-paper-raised/40 hover:bg-paper cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                   >
                     <UploadCloud className="w-4 h-4 text-blueprint" />
-                    <span>Upload Screenshot (PNG, JPG) or Paste from Clipboard</span>
+                    <span>Choose a screenshot (PNG, JPG, or WebP)</span>
                   </label>
                 </div>
               )}
@@ -491,23 +489,26 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                     onChange={(e) => setIncludeTelemetry(e.target.checked)}
                     className="cursor-pointer accent-blueprint"
                   />
-                  <span>include_diagnostic_telemetry</span>
+                  <span>Share device and page details to help us investigate</span>
                 </div>
                 <span className="text-[10px] text-ink-soft">
-                  {includeTelemetry ? '[enabled]' : '[disabled]'}
+                  {includeTelemetry ? 'On' : 'Off'}
                 </span>
               </label>
+              <p className="text-[10px] text-ink-soft">
+                This can include your browser, screen size, current page, and diagram details. Turn it off if you prefer.
+              </p>
 
               {includeTelemetry && (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-ink-soft border-t border-line/60 pt-2">
-                  <div>• OS: <span className="text-ink font-semibold">{telemetryPreview.os}</span></div>
+                  <div>• Operating system: <span className="text-ink font-semibold">{telemetryPreview.os}</span></div>
                   <div>• Browser: <span className="text-ink font-semibold">{telemetryPreview.browser}</span></div>
-                  <div>• Viewport: <span className="text-ink font-semibold">{telemetryPreview.viewport}</span></div>
-                  <div>• Path: <span className="text-ink font-semibold truncate block">{telemetryPreview.pathname || '/'}</span></div>
+                  <div>• Browser window size: <span className="text-ink font-semibold">{telemetryPreview.viewport}</span></div>
+                  <div>• Current page: <span className="text-ink font-semibold truncate block">{telemetryPreview.pathname || '/'}</span></div>
                   {diagramContext?.title && (
                     <div className="col-span-2 flex items-center gap-1 text-blueprint">
                       <Layers className="w-3 h-3 shrink-0" />
-                      <span>Canvas: {diagramContext.title} ({diagramContext.type || 'flowchart'}, {diagramContext.nodeCount || 0} shapes)</span>
+                      <span>Diagram: {diagramContext.title} ({diagramContext.type || 'flowchart'}, {diagramContext.nodeCount || 0} shapes)</span>
                     </div>
                   )}
                 </div>
@@ -518,7 +519,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
             <div className="p-2.5 border border-dashed border-line bg-paper-raised/30 flex items-center justify-between font-mono text-[11px]">
               <span className="text-ink-soft flex items-center gap-1.5">
                 <Keyboard className="w-3.5 h-3.5 text-blueprint" />
-                need_quick_help?
+                Need help now?
               </span>
               <div className="flex items-center gap-3 text-ink-soft">
                 <Link 
@@ -527,7 +528,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   className="flex items-center gap-1 text-blueprint hover:underline"
                 >
                   <BookOpen className="w-3 h-3" />
-                  docs()
+                  Help guides
                 </Link>
                 <Link 
                   to="/settings" 
@@ -535,7 +536,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   className="flex items-center gap-1 text-blueprint hover:underline"
                 >
                   <Sliders className="w-3 h-3" />
-                  settings()
+                  Settings
                 </Link>
               </div>
             </div>
@@ -553,7 +554,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   disabled={isSubmitting}
                   className="px-4 py-2 text-[12px]"
                 >
-                  cancel()
+                  Cancel
                 </Button>
                 <Button 
                   type="submit" 
@@ -562,7 +563,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, d
                   className="flex items-center gap-1.5 px-4 py-2 text-[12px]"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {isSubmitting ? 'submitting...' : 'submit_feedback()'}
+                  {isSubmitting ? 'Sending...' : 'Send feedback'}
                 </Button>
               </div>
             </div>

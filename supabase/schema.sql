@@ -95,9 +95,11 @@ create policy "Users can update their own profile"
 
 drop policy if exists "Admins can insert or delete profiles" on public.profiles;
 drop policy if exists "Enable insert for profiles" on public.profiles;
-create policy "Enable insert for profiles"
-  on public.profiles for insert
-  with check (true);
+
+-- The signup trigger owns inserts. Clients may update only non-privileged fields.
+revoke insert, update on public.profiles from anon, authenticated;
+grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme)
+  on public.profiles to authenticated;
 
 drop policy if exists "Admins can delete profiles" on public.profiles;
 create policy "Admins can delete profiles"
@@ -112,8 +114,6 @@ security definer set search_path = public
 as $$
 declare
   default_name text;
-  assigned_role public.user_role;
-  raw_role text;
 begin
   -- 1. Derive default name from raw_user_meta_data or email prefix
   if new.raw_user_meta_data is not null and (new.raw_user_meta_data->>'name') is not null then
@@ -124,23 +124,7 @@ begin
     default_name := 'User';
   end if;
 
-  -- 2. Determine role: any email containing 'admin' or 'superadmin' defaults to admin
-  if new.email is not null and (
-    new.email = 'admin@diagrid.dev' or 
-    lower(new.email) ilike '%admin%' or 
-    lower(new.email) ilike '%superadmin%'
-  ) then
-    assigned_role := 'admin'::public.user_role;
-  else
-    raw_role := case when new.raw_user_meta_data is not null then new.raw_user_meta_data->>'role' else null end;
-    if raw_role = 'admin' then
-      assigned_role := 'admin'::public.user_role;
-    else
-      assigned_role := 'user'::public.user_role;
-    end if;
-  end if;
-
-  -- 3. Insert profile record
+  -- New accounts always start as users. Promotion requires an admin operation.
   insert into public.profiles (
     id,
     email,
@@ -152,15 +136,15 @@ begin
     new.id,
     coalesce(new.email, ''),
     default_name,
-    assigned_role,
+    'user'::public.user_role,
     'preset'::public.avatar_type,
-    case when assigned_role = 'admin'::public.user_role then 'shield' else 'terminal' end
+    'terminal'
   )
   on conflict (id) do update
   set 
     email = excluded.email,
     name = coalesce(public.profiles.name, excluded.name),
-    role = case when public.profiles.role = 'admin'::public.user_role then 'admin'::public.user_role else excluded.role end;
+    role = public.profiles.role;
 
   return new;
 exception when others then
@@ -258,6 +242,8 @@ begin
   end if;
 end;
 $$ language plpgsql security definer;
+
+revoke execute on function public.promote_user_to_admin(text) from public, anon, authenticated;
 
 -- ==============================================================================
 -- 10. PROJECTS TABLE (Workspaces)

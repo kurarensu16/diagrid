@@ -154,7 +154,7 @@ export const Templates: React.FC = () => {
           <h1 className="text-[32px] sm:text-[36px] font-bold tracking-tight text-ink">
             Blueprint Templates
           </h1>
-          <p className="text-[14px] text-[#333C42] font-mono mt-1">
+          <p className="text-[14px] text-ink-soft font-mono mt-1">
             Pick a pre-assembled visual schematic to jumpstart your diagrams.
           </p>
         </div>
@@ -173,7 +173,7 @@ export const Templates: React.FC = () => {
             className={`px-4 py-2.5 border-r-2 last:border-r-0 border-ink uppercase tracking-wide transition-colors cursor-pointer font-bold ${
               activeTab === tab.value 
                 ? 'bg-ink text-paper' 
-                : 'text-[#333C42] hover:bg-ink hover:text-paper'
+                : 'text-ink-soft hover:bg-ink hover:text-paper'
             }`}
           >
             {tab.label}
@@ -240,7 +240,7 @@ export const Templates: React.FC = () => {
                 </div>
 
                 {/* Description */}
-                <p className="text-[13px] text-[#2C3439] leading-relaxed font-sans font-medium mt-1">
+                <p className="text-[13px] text-ink-soft leading-relaxed font-sans font-medium mt-1">
                   {detail.desc}
                 </p>
               </div>

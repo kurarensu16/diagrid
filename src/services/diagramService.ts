@@ -3,6 +3,14 @@ import { authService } from './authService';
 import { mockDb, type Diagram } from './mockDb';
 import { projectService } from './projectService';
 import { adminService } from './adminService';
+import { cloudSaveStatus } from './cloudSaveStatus';
+import { offlineSyncService } from './offlineSyncService';
+
+export type DiagramSaveResult =
+  | { status: 'cloud-saved'; savedAt: string }
+  | { status: 'local-only' }
+  | { status: 'cloud-failed' }
+  | { status: 'failed' };
 
 export const diagramService = {
   /**
@@ -14,6 +22,7 @@ export const diagramService = {
     }
 
     try {
+      await offlineSyncService.syncPending();
       const { data, error } = await supabase
         .from('diagrams')
         .select('*')
@@ -25,16 +34,32 @@ export const diagramService = {
         return mockDb.getDiagrams(projectId);
       }
 
-      // Format content so it behaves consistently as a JSON string
-      return data.map((d: any) => ({
+      // Keep unsynced local diagrams visible alongside cloud results.
+      const byId = new Map<string, Diagram>(data.map((d: any) => [d.id, {
         id: d.id,
         project_id: d.project_id,
         title: d.title,
         type: d.type,
         content: typeof d.content === 'string' ? d.content : JSON.stringify(d.content || { nodes: [], edges: [] }),
+        thumbnail_url: d.thumbnail_url,
         created_at: d.created_at,
         updated_at: d.updated_at
-      }));
+      }]));
+      const user = authService.getUserSync();
+      if (user) {
+        for (const id of cloudSaveStatus.pendingDiagramDeletionIds(user.id)) byId.delete(id);
+        for (const diagram of byId.values()) {
+          if (!cloudSaveStatus.isPending(user.id, diagram.id)) {
+            try { mockDb.upsertDiagram(diagram); } catch { /* Cloud data is still readable. */ }
+          }
+        }
+        for (const id of cloudSaveStatus.pendingDiagramIds(user.id)) {
+          if (cloudSaveStatus.isDiagramDeletionPending(user.id, id)) continue;
+          const local = mockDb.getDiagram(id);
+          if (local?.project_id === projectId) byId.set(id, local);
+        }
+      }
+      return [...byId.values()];
     } catch (err) {
       console.warn('[diagramService] getDiagrams error, using local fallback:', err);
       return mockDb.getDiagrams(projectId);
@@ -45,7 +70,15 @@ export const diagramService = {
    * Fetches a single diagram by ID.
    */
   getDiagram: async (id: string): Promise<Diagram | null> => {
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
+    const user = authService.getUserSync();
+    await offlineSyncService.syncPending();
+    if (user && cloudSaveStatus.isDiagramDeletionPending(user.id, id)) return null;
+    if (user && cloudSaveStatus.isPending(user.id, id)) {
+      const pendingLocalCopy = mockDb.getDiagram(id);
+      if (pendingLocalCopy) return pendingLocalCopy;
+    }
+
+    if (!isSupabaseConfigured() || !user) {
       return mockDb.getDiagram(id) || null;
     }
 
@@ -60,15 +93,22 @@ export const diagramService = {
         return mockDb.getDiagram(id) || null;
       }
 
-      return {
+      const diagram: Diagram = {
         id: data.id,
         project_id: data.project_id,
         title: data.title,
         type: data.type,
         content: typeof data.content === 'string' ? data.content : JSON.stringify(data.content || { nodes: [], edges: [] }),
+        thumbnail_url: data.thumbnail_url,
         created_at: data.created_at,
         updated_at: data.updated_at
       };
+      try {
+        mockDb.upsertDiagram(diagram);
+      } catch (err) {
+        console.warn('[diagramService] local mirror unavailable:', err);
+      }
+      return diagram;
     } catch {
       return mockDb.getDiagram(id) || null;
     }
@@ -108,56 +148,22 @@ export const diagramService = {
       return local;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('diagrams')
-        .insert({
-          project_id: projectId,
-          user_id: user.id,
-          title: title.trim(),
-          type,
-          content: parsedContent
-        })
-        .select()
-        .single();
-
-      if (error || !data) {
-        console.warn('[diagramService] createDiagram Supabase error, falling back:', error?.message);
-        return mockDb.createDiagram(projectId, title, type);
-      }
-
-      // Also mirror to mockDb for instant local fallback with matching ID
-      try {
-        mockDb.upsertDiagram({
-          id: data.id,
-          project_id: data.project_id,
-          title: data.title,
-          type: data.type,
-          content: typeof data.content === 'string' ? data.content : JSON.stringify(data.content || parsedContent),
-          created_at: data.created_at,
-          updated_at: data.updated_at
-        });
-      } catch {
-        // ignore mirror fail
-      }
-
-      // Record audit trail event asynchronously
-      if (user) {
-        adminService.logActivity('created_diagram', `${title.trim()} (${type.toUpperCase()})`, user.email);
-      }
-
-      return {
-        id: data.id,
-        project_id: data.project_id,
-        title: data.title,
-        type: data.type,
-        content: typeof data.content === 'string' ? data.content : JSON.stringify(data.content || parsedContent),
-        created_at: data.created_at,
-        updated_at: data.updated_at
-      };
-    } catch {
-      return mockDb.createDiagram(projectId, title, type);
+    const id = crypto.randomUUID();
+    if (!cloudSaveStatus.markPending(user.id, id)) {
+      throw new Error('Could not prepare a safe account sync. Please try again.');
     }
+    let diagram: Diagram;
+    try {
+      diagram = mockDb.createDiagram(projectId, title.trim(), type, JSON.stringify(parsedContent), id);
+    } catch (error) {
+      if (!mockDb.getDiagram(id)) cloudSaveStatus.clearPendingDiagram(user.id, id);
+      throw error;
+    }
+    await offlineSyncService.syncPending();
+    if (!cloudSaveStatus.isPending(user.id, diagram.id)) {
+      void adminService.logActivity('created_diagram', `${title.trim()} (${type.toUpperCase()})`, user.email);
+    }
+    return diagram;
   },
 
   /**
@@ -167,7 +173,7 @@ export const diagramService = {
     id: string,
     content: string | object,
     thumbnailUrl?: string
-  ): Promise<boolean> => {
+  ): Promise<DiagramSaveResult> => {
     let contentObj: any;
     let contentStr: string;
 
@@ -183,11 +189,26 @@ export const diagramService = {
       contentStr = JSON.stringify(content);
     }
 
-    // Always update mockDb mirror
-    mockDb.updateDiagram(id, { content: contentStr });
+    // Keep the latest edit in this browser before attempting the account save.
+    let localSaved = false;
+    try {
+      localSaved = Boolean(mockDb.updateDiagram(id, { content: contentStr, ...(thumbnailUrl !== undefined ? { thumbnail_url: thumbnailUrl } : {}) }));
+    } catch (err) {
+      console.warn('[diagramService] local save failed:', err);
+    }
 
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
-      return true;
+    const user = authService.getUserSync();
+    if (!isSupabaseConfigured() || !user) {
+      return { status: localSaved ? 'local-only' : 'failed' };
+    }
+
+    if (localSaved) {
+      if (!cloudSaveStatus.markPending(user.id, id)) return { status: 'cloud-failed' };
+      await offlineSyncService.syncPending();
+      if (!cloudSaveStatus.isPending(user.id, id)) {
+        return { status: 'cloud-saved', savedAt: cloudSaveStatus.getLastConfirmedSave(user.id) || new Date().toISOString() };
+      }
+      return { status: 'cloud-failed' };
     }
 
     try {
@@ -199,19 +220,21 @@ export const diagramService = {
         payload.thumbnail_url = thumbnailUrl;
       }
 
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from('diagrams')
-        .update(payload)
+        .update(payload, { count: 'exact' })
         .eq('id', id);
 
-      if (error) {
-        console.warn('[diagramService] saveDiagram warning:', error.message);
-        return false;
+      if (error || count !== 1) {
+        console.warn('[diagramService] saveDiagram warning:', error?.message || `Expected one updated diagram, got ${count}`);
+        return { status: localSaved ? 'cloud-failed' : 'failed' };
       }
-      return true;
+      const savedAt = new Date().toISOString();
+      if (!cloudSaveStatus.isPending(user.id, id)) cloudSaveStatus.recordConfirmedSave(user.id, id, savedAt);
+      return { status: 'cloud-saved', savedAt };
     } catch (err) {
       console.warn('[diagramService] saveDiagram exception:', err);
-      return false;
+      return { status: localSaved ? 'cloud-failed' : 'failed' };
     }
   },
 
@@ -219,12 +242,21 @@ export const diagramService = {
    * Updates diagram metadata (e.g. title).
    */
   updateDiagramMetadata: async (id: string, updates: { title?: string }): Promise<boolean> => {
-    if (updates.title) {
-      mockDb.updateDiagram(id, { title: updates.title.trim() });
+    const user = authService.getUserSync();
+    const previous = mockDb.getDiagram(id);
+    const local = updates.title ? mockDb.updateDiagram(id, { title: updates.title.trim() }) : mockDb.getDiagram(id);
+
+    if (!isSupabaseConfigured() || !user) {
+      return true;
     }
 
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
-      return true;
+    if (local) {
+      if (!cloudSaveStatus.markPending(user.id, id)) {
+        if (previous && updates.title) mockDb.updateDiagram(id, { title: previous.title });
+        return false;
+      }
+      await offlineSyncService.syncPending();
+      return !cloudSaveStatus.isPending(user.id, id);
     }
 
     try {
@@ -236,8 +268,10 @@ export const diagramService = {
         })
         .eq('id', id);
 
+      if (error) cloudSaveStatus.markPending(user.id, id);
       return !error;
     } catch {
+      cloudSaveStatus.markPending(user.id, id);
       return false;
     }
   },
@@ -262,27 +296,26 @@ export const diagramService = {
    * Deletes a diagram.
    */
   deleteDiagram: async (id: string): Promise<boolean> => {
-    mockDb.deleteDiagram(id);
-
-    if (!isSupabaseConfigured() || !authService.getUserSync()) {
+    const projectId = mockDb.getDiagram(id)?.project_id;
+    const user = authService.getUserSync();
+    if (!isSupabaseConfigured() || !user) {
+      mockDb.deleteDiagram(id);
       return true;
     }
 
+    if (!cloudSaveStatus.markDiagramDeletion(user.id, id, projectId || 'unknown')) return false;
     try {
-      const { error } = await supabase
-        .from('diagrams')
-        .delete()
-        .eq('id', id);
-
-      const user = authService.getUserSync();
-      if (!error && user) {
-        adminService.logActivity('deleted_diagram', `Diagram ${id}`, user.email);
-      }
-
-      return !error;
+      mockDb.deleteDiagram(id);
     } catch {
+      cloudSaveStatus.clearDiagramDeletion(user.id, id);
       return false;
     }
+    cloudSaveStatus.clearPendingDiagram(user.id, id);
+    await offlineSyncService.syncPending();
+    if (!cloudSaveStatus.isDiagramDeletionPending(user.id, id)) {
+      void adminService.logActivity('deleted_diagram', `Diagram ${id}`, user.email);
+    }
+    return true;
   },
 
   /**

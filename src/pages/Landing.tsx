@@ -20,7 +20,6 @@ import {
   X, 
   Sliders, 
   ExternalLink,
-  ShieldAlert,
   Code,
   MessageSquare,
   MousePointer,
@@ -1378,10 +1377,6 @@ export const Landing: React.FC = () => {
             </svg>
             GitHub
           </a>
-          <Link to="/admin" className="hover:text-white transition-colors text-signal flex items-center gap-1 font-bold">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            Admin Console
-          </Link>
         </div>
       </footer>
 

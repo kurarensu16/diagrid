@@ -48,6 +48,7 @@ export interface Diagram {
   title: string;
   type: 'erd' | 'flowchart' | 'sequence' | 'class' | 'gantt' | 'dfd' | 'usecase' | 'activity';
   content: string; // Serialized JSON string: { nodes: CanvasNode[], edges: CanvasEdge[] }
+  thumbnail_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -315,8 +316,10 @@ const setStored = <T>(key: string, value: T): void => {
   localStorage.setItem(key, JSON.stringify(value));
 };
 
-// Seed initial projects and diagrams if empty
+// Seed sample data only for a browser that has never stored projects.
 export const seedInitialData = (): void => {
+  // An explicitly empty project list means the user deleted everything.
+  if (localStorage.getItem(STORAGE_KEYS.PROJECTS) !== null) return;
   const projects = getStored<Project[]>(STORAGE_KEYS.PROJECTS, []);
 
   if (projects.length === 0) {
@@ -369,10 +372,10 @@ export const mockDb = {
     return mockDb.getProjects().find(p => p.id === id);
   },
 
-  createProject: (name: string, description: string = ''): Project => {
+  createProject: (name: string, description: string = '', customId?: string): Project => {
     const projects = mockDb.getProjects();
     const newProject: Project = {
-      id: `p-${Math.random().toString(36).substr(2, 9)}`,
+      id: customId || `p-${Math.random().toString(36).substr(2, 9)}`,
       name,
       description,
       created_at: new Date().toISOString(),
@@ -381,6 +384,14 @@ export const mockDb = {
     projects.push(newProject);
     setStored(STORAGE_KEYS.PROJECTS, projects);
     return newProject;
+  },
+
+  upsertProject: (project: Project): void => {
+    const projects = getStored<Project[]>(STORAGE_KEYS.PROJECTS, []);
+    const idx = projects.findIndex(p => p.id === project.id);
+    if (idx >= 0) projects[idx] = project;
+    else projects.push(project);
+    setStored(STORAGE_KEYS.PROJECTS, projects);
   },
 
   updateProject: (id: string, updates: Partial<Pick<Project, 'name' | 'description'>>): Project | undefined => {
@@ -440,7 +451,7 @@ export const mockDb = {
   },
 
   upsertDiagram: (diagram: Diagram): void => {
-    const diagrams = mockDb.getDiagrams();
+    const diagrams = getStored<Diagram[]>(STORAGE_KEYS.DIAGRAMS, []);
     const idx = diagrams.findIndex(d => d.id === diagram.id);
     if (idx >= 0) {
       diagrams[idx] = { ...diagram, updated_at: new Date().toISOString() };
@@ -450,7 +461,7 @@ export const mockDb = {
     setStored(STORAGE_KEYS.DIAGRAMS, diagrams);
   },
 
-  updateDiagram: (id: string, updates: Partial<Pick<Diagram, 'title' | 'content' | 'type'>>): Diagram | undefined => {
+  updateDiagram: (id: string, updates: Partial<Pick<Diagram, 'title' | 'content' | 'type' | 'thumbnail_url'>>): Diagram | undefined => {
     const diagrams = mockDb.getDiagrams();
     const idx = diagrams.findIndex(d => d.id === id);
     if (idx === -1) return undefined;

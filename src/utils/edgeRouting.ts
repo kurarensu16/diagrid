@@ -105,7 +105,11 @@ export const simplifyOrthogonalPath = (
 
     const isCollinearX = Math.abs(prev.x - curr.x) < 0.5 && Math.abs(curr.x - next.x) < 0.5;
     const isCollinearY = Math.abs(prev.y - curr.y) < 0.5 && Math.abs(curr.y - next.y) < 0.5;
-    if (!isCollinearX && !isCollinearY) {
+    // A reversal on the same axis is a real turn. Removing it can send the
+    // simplified line back through the node even though the candidate was clear.
+    const between = (value: number, a: number, b: number) => value >= Math.min(a, b) && value <= Math.max(a, b);
+    if ((!isCollinearX || !between(curr.y, prev.y, next.y)) &&
+        (!isCollinearY || !between(curr.x, prev.x, next.x))) {
       result.push(curr);
     }
   }
@@ -122,6 +126,28 @@ export const buildSvgPath = (pts: { x: number; y: number }[]): string => {
   return path;
 };
 
+// Place badges on a visible straight run of the routed connector, rather than
+// between the shape centers (which can be far away from a bent route).
+export const getEdgeLabelPosition = (path: string): { x: number; y: number } => {
+  const points = [...path.matchAll(/[ML]\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)]
+    .map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return points[0];
+
+  let bestLength = -1;
+  let best = points[0];
+  for (let i = 1; i < points.length; i++) {
+    const start = points[i - 1];
+    const end = points[i];
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length > bestLength) {
+      bestLength = length;
+      best = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    }
+  }
+  return best;
+};
+
 export const getOrthogonalRoutePath = (
   start: { x: number; y: number },
   end: { x: number; y: number },
@@ -133,39 +159,6 @@ export const getOrthogonalRoutePath = (
 ): string => {
   const isHorizA = (hA === 'left' || hA === 'right');
   const isHorizB = (hB === 'left' || hB === 'right');
-
-  // SMART STRAIGHT-LINE SNAPPING:
-  // 1. Both ports are vertical (top/bottom) and x positions are roughly aligned (within 14px)
-  if (!isHorizA && !isHorizB && Math.abs(start.x - end.x) <= 14) {
-    const straightX = Math.round((start.x + end.x) / 2);
-    const straightPath = [start, { x: straightX, y: start.y }, { x: straightX, y: end.y }, end];
-    let collides = false;
-    for (let i = 0; i < straightPath.length - 1; i++) {
-      if (isSegmentBlocked(straightPath[i], straightPath[i + 1], allNodes, sourceNode.id, targetNode.id)) {
-        collides = true;
-        break;
-      }
-    }
-    if (!collides) {
-      return buildSvgPath(simplifyOrthogonalPath(straightPath));
-    }
-  }
-
-  // 2. Both ports are horizontal (left/right) and y positions are roughly aligned (within 14px)
-  if (isHorizA && isHorizB && Math.abs(start.y - end.y) <= 14) {
-    const straightY = Math.round((start.y + end.y) / 2);
-    const straightPath = [start, { x: start.x, y: straightY }, { x: end.x, y: straightY }, end];
-    let collides = false;
-    for (let i = 0; i < straightPath.length - 1; i++) {
-      if (isSegmentBlocked(straightPath[i], straightPath[i + 1], allNodes, sourceNode.id, targetNode.id)) {
-        collides = true;
-        break;
-      }
-    }
-    if (!collides) {
-      return buildSvgPath(simplifyOrthogonalPath(straightPath));
-    }
-  }
 
   const buffer = 20;
 
@@ -181,56 +174,50 @@ export const getOrthogonalRoutePath = (
   const startBuf = getBufferPoint(start, hA);
   const endBuf = getBufferPoint(end, hB);
 
+  // The two endpoint segments must leave their cards through the selected ports.
+  // Every other segment must stay clear of *all* cards, including the endpoints.
+  // Otherwise a card painted above the SVG hides part of the line and leaves a
+  // seemingly disconnected arrow or a stray segment on its opposite side.
+  const routeIsClear = (path: { x: number; y: number }[]) => path.every((pt, i) => {
+    if (i === path.length - 1) return true;
+    const next = path[i + 1];
+    if (pt.x !== next.x && pt.y !== next.y) return false;
+    return !isSegmentBlocked(
+      pt, next, allNodes,
+      i === 0 ? sourceNode.id : '',
+      i === path.length - 2 ? targetNode.id : ''
+    );
+  });
+
   // Default simple path candidates (clean S-shape, L-shape, and loopbacks)
   const candidates: { x: number; y: number }[][] = [];
 
-  const midX = Math.round((start.x + end.x) / 2);
-  const midY = Math.round((start.y + end.y) / 2);
+  const midX = Math.round((startBuf.x + endBuf.x) / 2);
+  const midY = Math.round((startBuf.y + endBuf.y) / 2);
 
   if (isHorizA && isHorizB) {
-    if (hA === 'right' && hB === 'left' && end.x > start.x + 10) {
-      candidates.push([start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]);
-    } else if (hA === 'left' && hB === 'right' && start.x > end.x + 10) {
-      candidates.push([start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]);
-    } else {
-      candidates.push([start, startBuf, { x: midX, y: startBuf.y }, { x: midX, y: endBuf.y }, endBuf, end]);
-    }
+    candidates.push([start, startBuf, { x: midX, y: startBuf.y }, { x: midX, y: endBuf.y }, endBuf, end]);
     const minY = Math.min(start.y, end.y) - 40;
     const maxY = Math.max(start.y, end.y) + 40;
     candidates.push([start, startBuf, { x: startBuf.x, y: minY }, { x: endBuf.x, y: minY }, endBuf, end]);
     candidates.push([start, startBuf, { x: startBuf.x, y: maxY }, { x: endBuf.x, y: maxY }, endBuf, end]);
   } else if (!isHorizA && !isHorizB) {
-    if (hA === 'bottom' && hB === 'top' && end.y > start.y + 10) {
-      candidates.push([start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]);
-    } else if (hA === 'top' && hB === 'bottom' && start.y > end.y + 10) {
-      candidates.push([start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]);
-    } else {
-      candidates.push([start, startBuf, { x: startBuf.x, y: midY }, { x: endBuf.x, y: midY }, endBuf, end]);
-    }
+    candidates.push([start, startBuf, { x: startBuf.x, y: midY }, { x: endBuf.x, y: midY }, endBuf, end]);
     const minX = Math.min(start.x, end.x) - 40;
     const maxX = Math.max(start.x, end.x) + 40;
     candidates.push([start, startBuf, { x: minX, y: startBuf.y }, { x: minX, y: endBuf.y }, endBuf, end]);
     candidates.push([start, startBuf, { x: maxX, y: startBuf.y }, { x: maxX, y: endBuf.y }, endBuf, end]);
   } else if (isHorizA && !isHorizB) {
-    candidates.push([start, { x: end.x, y: start.y }, end]);
-    candidates.push([start, { x: start.x, y: end.y }, end]);
-    candidates.push([start, startBuf, { x: end.x, y: startBuf.y }, end]);
+    candidates.push([start, startBuf, { x: endBuf.x, y: startBuf.y }, endBuf, end]);
+    candidates.push([start, startBuf, { x: startBuf.x, y: endBuf.y }, endBuf, end]);
   } else {
-    candidates.push([start, { x: start.x, y: end.y }, end]);
-    candidates.push([start, { x: end.x, y: start.y }, end]);
-    candidates.push([start, startBuf, { x: startBuf.x, y: end.y }, end]);
+    candidates.push([start, startBuf, { x: startBuf.x, y: endBuf.y }, endBuf, end]);
+    candidates.push([start, startBuf, { x: endBuf.x, y: startBuf.y }, endBuf, end]);
   }
 
   // Check if any candidate has NO collisions
   for (const path of candidates) {
-    let collides = false;
-    for (let i = 0; i < path.length - 1; i++) {
-      if (isSegmentBlocked(path[i], path[i + 1], allNodes, sourceNode.id, targetNode.id)) {
-        collides = true;
-        break;
-      }
-    }
-    if (!collides) {
+    if (routeIsClear(path)) {
       return buildSvgPath(simplifyOrthogonalPath(path));
     }
   }
@@ -299,7 +286,6 @@ export const getOrthogonalRoutePath = (
     for (const nbr of neighbors) {
       let insideObstacle = false;
       for (const node of allNodes) {
-        if (node.id === sourceNode.id || node.id === targetNode.id) continue;
         if (isPointInsideNode(nbr.pt.x, nbr.pt.y, node)) {
           insideObstacle = true;
           break;
@@ -307,7 +293,7 @@ export const getOrthogonalRoutePath = (
       }
       if (insideObstacle) continue;
 
-      if (isSegmentBlocked(curr.pt, nbr.pt, allNodes, sourceNode.id, targetNode.id)) {
+      if (isSegmentBlocked(curr.pt, nbr.pt, allNodes, '', '')) {
         continue;
       }
 
@@ -328,8 +314,8 @@ export const getOrthogonalRoutePath = (
     }
   }
 
-  if (bestPath) {
-    return buildSvgPath([start, ...bestPath, end]);
+  if (bestPath && routeIsClear([start, ...bestPath, end])) {
+    return buildSvgPath(simplifyOrthogonalPath([start, ...bestPath, end]));
   }
 
   return buildSvgPath(candidates[0]);
