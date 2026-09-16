@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { adminService, type AdminUser } from '../../services/adminService';
-import { Search, Eye, X, UserCheck, UserX, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, RefreshCw, Heart } from 'lucide-react';
+import { Search, Eye, X, UserCheck, UserX, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, RefreshCw, Heart, MoreVertical } from 'lucide-react';
 
 export const AdminUsers: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -10,6 +10,8 @@ export const AdminUsers: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended'>('all');
   const [roleFilter, setRoleFilter] = useState<'all' | 'user' | 'admin'>('all');
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -37,7 +39,11 @@ export const AdminUsers: React.FC = () => {
   const handleToggleStatus = async (id: string, currentStatus: 'active' | 'suspended') => {
     const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
     if (confirm(`Are you sure you want to change this user status to ${nextStatus.toUpperCase()}?`)) {
-      await adminService.setUserStatus(id, nextStatus);
+      const result = await adminService.setUserStatus(id, nextStatus);
+      if (result.error) {
+        setActionError(result.error);
+        return;
+      }
       await loadUsers();
       if (selectedUser && selectedUser.id === id) {
         setSelectedUser({ ...selectedUser, status: nextStatus });
@@ -47,7 +53,11 @@ export const AdminUsers: React.FC = () => {
 
   const handleToggleSupporter = async (id: string, isSupporter: boolean) => {
     const nextState = !isSupporter;
-    await adminService.setUserSupporterStatus(id, nextState);
+    const result = await adminService.setUserSupporterStatus(id, nextState);
+    if (result.error) {
+      setActionError(result.error);
+      return;
+    }
     await loadUsers();
     if (selectedUser && selectedUser.id === id) {
       setSelectedUser({ ...selectedUser, is_supporter: nextState });
@@ -145,6 +155,15 @@ export const AdminUsers: React.FC = () => {
         </div>
       </div>
 
+      {actionError && (
+        <div className="flex items-center justify-between border border-signal bg-signal/10 px-3 py-2 font-mono text-[11px] text-signal">
+          <span>action_error: {actionError}</span>
+          <button onClick={() => setActionError(null)} className="cursor-pointer hover:text-ink" aria-label="Dismiss error">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Users List Table */}
       <Card variant="blueprint" className="p-0 overflow-x-auto select-text">
         <table className="w-full text-left border-collapse font-mono text-[12px]">
@@ -216,42 +235,57 @@ export const AdminUsers: React.FC = () => {
                     })}
                   </td>
                   <td className="p-4 text-center">
-                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                    <div className="relative flex items-center justify-center">
                       <button
-                        onClick={() => setSelectedUser(u)}
-                        className="font-mono text-[10px] border border-line text-ink hover:border-blueprint hover:text-blueprint px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors flex items-center gap-1"
-                        title="View user details"
+                        onClick={() => {
+                          setActionError(null);
+                          setOpenActionMenu(openActionMenu === u.id ? null : u.id);
+                        }}
+                        className="p-1.5 border border-line text-ink hover:border-blueprint hover:text-blueprint cursor-pointer transition-colors"
+                        title="Open user actions"
+                        aria-label={`Open actions for ${u.email}`}
+                        aria-expanded={openActionMenu === u.id}
                       >
-                        <Eye className="w-3 h-3" />
-                        details
+                        <MoreVertical className="w-4 h-4" />
                       </button>
 
-                      <button
-                        onClick={() => handleToggleSupporter(u.id, !!u.is_supporter)}
-                        className={`font-mono text-[10px] border px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors flex items-center gap-1 ${
-                          u.is_supporter
-                            ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10'
-                            : 'border-line text-ink-soft hover:border-rose-500 hover:text-rose-600'
-                        }`}
-                        title="Toggle Supporter Perk"
-                      >
-                        <Heart className={`w-3 h-3 ${u.is_supporter ? 'fill-rose-600 text-rose-600' : ''}`} />
-                        {u.is_supporter ? 'perk_on' : 'grant_perk'}
-                      </button>
-
-                      {u.role === 'admin' ? (
-                        <span className="text-ink-soft text-[10px] select-none italic">// locked</span>
-                      ) : (
-                        <button
-                          onClick={() => handleToggleStatus(u.id, u.status)}
-                          className={`font-mono text-[10px] border px-2 py-1 uppercase tracking-wide cursor-pointer transition-colors ${
-                            u.status === 'active'
-                              ? 'border-signal text-signal hover:bg-signal hover:text-paper'
-                              : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
-                          }`}
-                        >
-                          {u.status === 'active' ? 'suspend()' : 'activate()'}
-                        </button>
+                      {openActionMenu === u.id && (
+                        <div className="absolute right-0 top-full z-20 mt-1 min-w-[155px] border border-ink bg-paper shadow-hard font-mono text-[10px] text-left">
+                          <button
+                            onClick={() => {
+                              setSelectedUser(u);
+                              setOpenActionMenu(null);
+                            }}
+                            className="w-full px-3 py-2 flex items-center gap-2 hover:bg-paper-raised cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            details
+                          </button>
+                          <button
+                            onClick={() => {
+                              setOpenActionMenu(null);
+                              void handleToggleSupporter(u.id, !!u.is_supporter);
+                            }}
+                            className={`w-full px-3 py-2 flex items-center gap-2 hover:bg-paper-raised cursor-pointer ${u.is_supporter ? 'text-rose-600' : 'text-ink'}`}
+                          >
+                            <Heart className={`w-3 h-3 ${u.is_supporter ? 'fill-rose-600' : ''}`} />
+                            {u.is_supporter ? 'revoke_perk' : 'grant_perk'}
+                          </button>
+                          {u.role === 'admin' ? (
+                            <div className="px-3 py-2 text-ink-soft italic border-t border-line">// locked</div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setOpenActionMenu(null);
+                                void handleToggleStatus(u.id, u.status);
+                              }}
+                              className={`w-full px-3 py-2 flex items-center gap-2 border-t border-line hover:bg-paper-raised cursor-pointer ${u.status === 'active' ? 'text-signal' : 'text-blueprint'}`}
+                            >
+                              {u.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
+                              {u.status === 'active' ? 'suspend()' : 'activate()'}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </td>
@@ -392,7 +426,7 @@ export const AdminUsers: React.FC = () => {
 
       {/* User Details Modal Dialog */}
       {selectedUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink bg-opacity-60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(21,25,28,0.25)] backdrop-blur-[1px] p-4">
           <Card variant="blueprint" className="w-full max-w-lg p-6 flex flex-col gap-5 bg-paper shadow-hard">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-line pb-4">

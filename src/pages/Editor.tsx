@@ -55,7 +55,8 @@ import {
   Edit3,
   Grid,
   Magnet,
-  AlertTriangle
+  AlertTriangle,
+  User
 } from 'lucide-react';
 
 interface FreehandDrawing {
@@ -117,6 +118,60 @@ const AVAILABLE_SHAPE_TYPES: { type: CanvasNode['type']; label: string }[] = [
   { type: 'usecase-boundary', label: 'Boundary (Box)' },
   { type: 'activity-action', label: 'Action (Rounded)' },
 ];
+
+const UNIVERSAL_TOOLBOX_GROUPS: { label: string; items: { type: CanvasNode['type']; label: string }[] }[] = [
+  { label: 'Flowchart', items: [
+    { type: 'process', label: 'Process Step (Box)' },
+    { type: 'decision', label: 'Decision (Diamond)' },
+    { type: 'terminal', label: 'Start / End (Oval)' },
+  ] },
+  { label: 'Database / ERD', items: [{ type: 'table', label: 'Database Table' }] },
+  { label: 'Data Flow (DFD)', items: [
+    { type: 'dfd-entity', label: 'External Entity' },
+    { type: 'dfd-process', label: 'Transform Process' },
+    { type: 'dfd-store', label: 'Data Store' },
+  ] },
+  { label: 'Use Case', items: [
+    { type: 'usecase-actor', label: 'User Actor' },
+    { type: 'usecase-oval', label: 'Use Case Oval' },
+    { type: 'usecase-boundary', label: 'System Boundary' },
+  ] },
+  { label: 'Activity', items: [
+    { type: 'activity-start', label: 'Start State' },
+    { type: 'activity-action', label: 'Action Step' },
+    { type: 'activity-decision', label: 'Decision Diamond' },
+    { type: 'activity-fork', label: 'Fork / Join Bar' },
+    { type: 'activity-end', label: 'Final State' },
+  ] },
+  { label: 'Sequence', items: [
+    { type: 'process', label: 'Participant' },
+    { type: 'sequence-activation', label: 'Activation Bar' },
+  ] },
+  { label: 'Annotation', items: [{ type: 'text', label: 'Text Box / Note' }] },
+];
+
+const getToolIcon = (type: CanvasNode['type']): React.ReactNode => {
+  const iconClass = 'w-3.5 h-3.5 text-blueprint';
+  switch (type) {
+    case 'table': return <Database className={iconClass} />;
+    case 'decision':
+    case 'activity-decision': return <Diamond className="w-3.5 h-3.5 text-signal" />;
+    case 'terminal': return <Circle className="w-3.5 h-3.5 text-ink" />;
+    case 'dfd-entity': return <Square className={iconClass} />;
+    case 'dfd-process': return <Circle className={iconClass} />;
+    case 'dfd-store': return <span className="w-3.5 h-2.5 border-y border-ink" />;
+    case 'usecase-actor': return <User className={iconClass} />;
+    case 'usecase-oval': return <Circle className={iconClass} />;
+    case 'usecase-boundary': return <Square className="w-3.5 h-3.5 text-ink-soft" />;
+    case 'activity-start': return <Circle className="w-3.5 h-3.5 fill-ink text-ink" />;
+    case 'activity-action': return <Square className={iconClass} />;
+    case 'activity-fork': return <span className="w-3.5 h-1 bg-ink" />;
+    case 'activity-end': return <Circle className="w-3.5 h-3.5 text-ink" />;
+    case 'sequence-activation': return <span className="w-2 h-3.5 border border-ink" />;
+    case 'text': return <Type className={iconClass} />;
+    default: return <Square className={iconClass} />;
+  }
+};
 
 const FILL_COLOR_PRESETS = [
   { label: 'Paper', value: '#FFFFFF', bg: '#FFFFFF' },
@@ -2444,7 +2499,37 @@ export const Editor: React.FC = () => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  {diagram.type === 'erd' || diagram.type === 'class' ? (
+                  {diagram.type === 'blank' ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[10px] text-ink-soft font-mono leading-relaxed border border-blueprint bg-[#EBF3FA] dark:bg-[#152332] p-2">
+                        // universal canvas — every shape is available
+                      </div>
+                      {UNIVERSAL_TOOLBOX_GROUPS.map((group) => (
+                        <details key={group.label} open className="border border-line bg-paper-raised">
+                          <summary className="px-2.5 py-2 font-mono text-[10px] text-blueprint uppercase tracking-wider font-bold cursor-pointer select-none hover:bg-paper">
+                            {group.label}
+                          </summary>
+                          <div className="flex flex-col gap-1.5 px-1.5 pb-1.5">
+                            {group.items.map((item) => (
+                              <button
+                                key={`${group.label}-${item.type}-${item.label}`}
+                                onClick={() => addNode(item.type)}
+                                className="w-full border-2 border-ink py-2 px-2.5 font-mono text-[11px] text-left bg-paper-raised hover:bg-paper hover:border-blueprint select-none transition-colors cursor-pointer flex items-center justify-between group"
+                              >
+                                <span className="flex items-center gap-2">
+                                  {getToolIcon(item.type)}
+                                  <span>{item.label}</span>
+                                </span>
+                                <span className="w-4 h-4 rounded-full bg-blueprint border border-ink flex items-center justify-center shrink-0">
+                                  <Plus size={10} strokeWidth={3} className="text-white" />
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : diagram.type === 'erd' || diagram.type === 'class' ? (
                     <button
                       onClick={() => addNode('table')}
                       className="w-full border-2 border-ink py-2 px-3 font-mono text-[12px] text-left bg-paper-raised hover:bg-paper hover:border-blueprint select-none transition-colors cursor-pointer flex items-center justify-between group"

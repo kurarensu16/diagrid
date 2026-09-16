@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { adminService, type ActivityLog } from '../../services/adminService';
-import { Calendar, User, Info, Search, RefreshCw, Trash2, ArrowUpRight, LogIn, Plus } from 'lucide-react';
+import { Calendar, User, Info, Search, RefreshCw, Trash2, ArrowUpRight, LogIn, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 type FilterTab = 'all' | 'sign_ins' | 'creates' | 'exports' | 'deletes';
 
@@ -11,10 +11,16 @@ export const AdminActivity: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     handleRefresh();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeTab, pageSize]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -40,6 +46,11 @@ export const AdminActivity: React.FC = () => {
 
     return matchesSearch && matchesCategory;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const paginatedLogs = filteredLogs.slice(startIndex, startIndex + pageSize);
 
   const filterTabs: { id: FilterTab; label: string; count: number }[] = [
     { id: 'all', label: 'All', count: logs.length },
@@ -122,7 +133,7 @@ export const AdminActivity: React.FC = () => {
             </p>
           </Card>
         ) : (
-          filteredLogs.map((log) => {
+          paginatedLogs.map((log) => {
             let badgeStyle = "border-line text-ink-soft";
             let Icon = Info;
             let actionVerb = log.action.replace('_', ' ');
@@ -179,6 +190,72 @@ export const AdminActivity: React.FC = () => {
           })
         )}
       </div>
+
+      {!isLoading && filteredLogs.length > 0 && (
+        <div className="border border-line bg-paper-raised px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px]">
+          <div className="flex items-center gap-4 text-ink-soft">
+            <span>
+              showing <strong className="text-ink">{startIndex + 1}</strong>-
+              <strong className="text-ink">{Math.min(startIndex + pageSize, filteredLogs.length)}</strong> of{' '}
+              <strong className="text-ink">{filteredLogs.length}</strong> entries
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase font-bold">per_page:</span>
+              <div className="flex border border-line bg-paper">
+                {[10, 25, 50].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setPageSize(size)}
+                    className={`px-2 py-0.5 border-r last:border-r-0 border-line text-[10px] cursor-pointer transition-colors ${
+                      pageSize === size ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:bg-paper-raised hover:text-ink'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={validCurrentPage === 1}
+                className="p-1.5 border border-line disabled:opacity-30 hover:border-ink cursor-pointer disabled:cursor-not-allowed"
+                title="First page"
+              >
+                <ChevronsLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={validCurrentPage === 1}
+                className="p-1.5 border border-line disabled:opacity-30 hover:border-ink cursor-pointer disabled:cursor-not-allowed"
+                title="Previous page"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="min-w-[70px] text-center text-ink-soft">page {validCurrentPage} / {totalPages}</span>
+              <button
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                disabled={validCurrentPage === totalPages}
+                className="p-1.5 border border-line disabled:opacity-30 hover:border-ink cursor-pointer disabled:cursor-not-allowed"
+                title="Next page"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={validCurrentPage === totalPages}
+                className="p-1.5 border border-line disabled:opacity-30 hover:border-ink cursor-pointer disabled:cursor-not-allowed"
+                title="Last page"
+              >
+                <ChevronsRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 -- Apply to an existing Supabase project before enabling social sign-in.
 drop policy if exists "Enable insert for profiles" on public.profiles;
 revoke insert, update on public.profiles from anon, authenticated;
-grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme)
+grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme, is_supporter)
   on public.profiles to authenticated;
 
 create or replace function public.handle_new_user()

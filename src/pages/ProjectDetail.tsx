@@ -48,6 +48,7 @@ export const ProjectDetail: React.FC = () => {
   const allTemplates = React.useMemo(() => mockDb.getTemplates(), []);
 
   const diagramTemplates = React.useMemo(() => [
+    { type: 'blank' as const, label: 'Blank Canvas', desc: 'Start with an empty canvas and access every shape in the universal toolbox', nodeCount: '0 Shapes', summary: 'All toolbox categories' },
     { type: 'erd' as const, label: 'Entity Relationship (ERD)', desc: 'Document schemas, keys, constraints, and table relationships', nodeCount: '3 Tables • 2 Relations', summary: 'Tables: users, projects, diagrams' },
     { type: 'flowchart' as const, label: 'Flowchart', desc: 'Map system execution workflows, logic branching, and conditional loops', nodeCount: '5 Steps • Decision Diamond', summary: 'Terminals, Process, Decision' },
     { type: 'sequence' as const, label: 'Sequence Diagram', desc: 'Track request-response lifetimes between actors, endpoints, and caches', nodeCount: '3 Lifelines • 4 Timed Calls', summary: 'Lifelines & Async returns' },
