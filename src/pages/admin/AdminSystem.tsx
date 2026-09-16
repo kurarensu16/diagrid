@@ -19,8 +19,18 @@ import {
   Plus,
   Trash2,
   QrCode,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Check,
+  X
 } from 'lucide-react';
+
+type PendingConfirmation = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger?: boolean;
+  action: () => Promise<void> | void;
+};
 
 export const AdminSystem: React.FC = () => {
   const [templateConfigs, setTemplateConfigs] = useState<TemplateConfig[]>([]);
@@ -53,6 +63,7 @@ export const AdminSystem: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -92,10 +103,26 @@ export const AdminSystem: React.FC = () => {
     }
   };
 
+  const requestConfirmation = (confirmation: PendingConfirmation) => {
+    if (isUpdating) return;
+    setPendingConfirmation(confirmation);
+  };
+
+  const confirmPendingAction = async () => {
+    if (!pendingConfirmation) return;
+    const action = pendingConfirmation.action;
+    setPendingConfirmation(null);
+    try {
+      await action();
+    } catch {
+      showToast('Action failed. No settings were changed.');
+    }
+  };
+
   const handleUpdateSetting = async <K extends keyof PlatformSettings>(
     key: K, 
     value: PlatformSettings[K]
-  ) => {
+  ): Promise<boolean> => {
     setIsUpdating(true);
     const prev = { ...settings };
     const updated = { ...settings, [key]: value };
@@ -106,15 +133,35 @@ export const AdminSystem: React.FC = () => {
       if (res.error) {
         setSettings(prev);
         showToast(`Error updating ${key}: ${res.error}`);
+        return false;
       } else {
         showToast(`Updated platform policy [${key}] successfully.`);
+        return true;
       }
     } catch {
       setSettings(prev);
       showToast(`Network error updating ${key}.`);
+      return false;
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  const requestSettingUpdate = <K extends keyof PlatformSettings>(
+    key: K,
+    value: PlatformSettings[K],
+    description: string,
+    danger = false,
+  ) => {
+    requestConfirmation({
+      title: `confirm_setting_change(${key})`,
+      description,
+      confirmLabel: 'apply_change()',
+      danger,
+      action: async () => {
+        await handleUpdateSetting(key, value);
+      },
+    });
   };
 
   // Multi-Wallet Handlers
@@ -123,9 +170,16 @@ export const AdminSystem: React.FC = () => {
     const updated = currentWallets.map((w) =>
       w.id === walletId ? { ...w, enabled: !w.enabled } : w
     );
-    await handleUpdateSetting('creator_wallets', updated);
     const target = updated.find((w) => w.id === walletId);
-    showToast(`Payment method [${target?.name || 'Wallet'}] ${target?.enabled ? 'ACTIVATED' : 'MUTED'}.`);
+    requestConfirmation({
+      title: `${target?.enabled ? 'enable' : 'disable'}_wallet(${target?.name || 'wallet'})`,
+      description: `This changes whether ${target?.name || 'this payment method'} is visible to supporters.`,
+      confirmLabel: target?.enabled ? 'enable_wallet()' : 'disable_wallet()',
+      action: async () => {
+        const saved = await handleUpdateSetting('creator_wallets', updated);
+        if (saved) showToast(`Payment method [${target?.name || 'Wallet'}] ${target?.enabled ? 'ACTIVATED' : 'MUTED'}.`);
+      },
+    });
   };
 
   const handleAddWallet = async (presetName: string = 'GCash') => {
@@ -139,8 +193,15 @@ export const AdminSystem: React.FC = () => {
       enabled: true,
     };
     const updated = [...currentWallets, newWallet];
-    await handleUpdateSetting('creator_wallets', updated);
-    showToast(`Added [${presetName}] to digital wallets.`);
+    requestConfirmation({
+      title: `add_wallet(${presetName})`,
+      description: `Add ${presetName} as a new supporter payment method?`,
+      confirmLabel: 'add_wallet()',
+      action: async () => {
+        const saved = await handleUpdateSetting('creator_wallets', updated);
+        if (saved) showToast(`Added [${presetName}] to digital wallets.`);
+      },
+    });
   };
 
   const handleUpdateWalletField = (walletId: string, field: keyof CreatorWallet, value: any) => {
@@ -152,32 +213,59 @@ export const AdminSystem: React.FC = () => {
   };
 
   const handleSaveWalletChanges = async () => {
-    await handleUpdateSetting('creator_wallets', settings.creator_wallets || []);
-    showToast('Saved all wallet configurations.');
+    requestConfirmation({
+      title: 'save_wallet_changes()',
+      description: 'Save the edited wallet names, account details, and QR image URLs?',
+      confirmLabel: 'save_wallets()',
+      action: async () => {
+        const saved = await handleUpdateSetting('creator_wallets', settings.creator_wallets || []);
+        if (saved) showToast('Saved all wallet configurations.');
+      },
+    });
   };
 
   const handleDeleteWallet = async (walletId: string) => {
     const currentWallets = settings.creator_wallets || [];
     const target = currentWallets.find((w) => w.id === walletId);
     const updated = currentWallets.filter((w) => w.id !== walletId);
-    await handleUpdateSetting('creator_wallets', updated);
-    showToast(`Removed wallet [${target?.name || 'entry'}].`);
+    requestConfirmation({
+      title: `remove_wallet(${target?.name || 'entry'})`,
+      description: 'This removes the payment method from the platform configuration.',
+      confirmLabel: 'remove_wallet()',
+      danger: true,
+      action: async () => {
+        const saved = await handleUpdateSetting('creator_wallets', updated);
+        if (saved) showToast(`Removed wallet [${target?.name || 'entry'}].`);
+      },
+    });
   };
 
   const handleToggleEnabled = async (id: string, currentEnabled: boolean) => {
-    await adminService.updateTemplateConfig(id, { enabled: !currentEnabled });
-    setTemplateConfigs((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, enabled: !currentEnabled } : c))
-    );
-    showToast(`Template visibility toggled.`);
+    requestConfirmation({
+      title: 'change_template_visibility()',
+      description: `${currentEnabled ? 'Hide' : 'Publish'} this template in the developer gallery?`,
+      confirmLabel: currentEnabled ? 'hide_template()' : 'publish_template()',
+      action: async () => {
+        const result = await adminService.updateTemplateConfig(id, { enabled: !currentEnabled });
+        if (result.error) return showToast(`Error updating template: ${result.error}`);
+        setTemplateConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, enabled: !currentEnabled } : c)));
+        showToast(`Template visibility toggled.`);
+      },
+    });
   };
 
   const handleToggleFeatured = async (id: string, currentFeatured: boolean) => {
-    await adminService.updateTemplateConfig(id, { featured: !currentFeatured });
-    setTemplateConfigs((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, featured: !currentFeatured } : c))
-    );
-    showToast(`Template featured pin toggled.`);
+    requestConfirmation({
+      title: 'change_template_featured_state()',
+      description: `${currentFeatured ? 'Remove this template from' : 'Pin this template to'} the featured gallery list?`,
+      confirmLabel: currentFeatured ? 'unfeature_template()' : 'feature_template()',
+      action: async () => {
+        const result = await adminService.updateTemplateConfig(id, { featured: !currentFeatured });
+        if (result.error) return showToast(`Error updating template: ${result.error}`);
+        setTemplateConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, featured: !currentFeatured } : c)));
+        showToast(`Template featured pin toggled.`);
+      },
+    });
   };
 
   // Diagnostic parameters
@@ -223,6 +311,21 @@ export const AdminSystem: React.FC = () => {
         </div>
       )}
 
+      {/* Configuration overview */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {[
+          { label: 'registration', value: settings.registration_policy.replace('_', ' '), tone: 'text-blueprint' },
+          { label: 'project_limit', value: settings.max_projects_per_user === 0 ? 'unlimited' : `${settings.max_projects_per_user} / user`, tone: 'text-ink' },
+          { label: 'wallets_active', value: `${(settings.creator_wallets || []).filter((wallet) => wallet.enabled).length} / ${(settings.creator_wallets || []).length}`, tone: 'text-rose-600' },
+          { label: 'templates_published', value: `${templateConfigs.filter((template) => template.enabled).length} / ${templateConfigs.length}`, tone: 'text-signal' },
+        ].map((item) => (
+          <div key={item.label} className="border border-line bg-paper-raised px-4 py-3 shadow-[2px_2px_0px_0px_rgba(21,25,28,0.08)]">
+            <span className="block font-mono text-[10px] uppercase tracking-wide text-ink-soft">// {item.label}</span>
+            <span className={`block mt-1 font-mono text-[15px] font-bold uppercase ${item.tone}`}>{item.value}</span>
+          </div>
+        ))}
+      </div>
+
       {/* Maintenance Mode Alert Banner if active */}
       {settings.maintenance_mode && (
         <div className="bg-amber-500/10 border border-amber-500/50 text-amber-900 dark:text-amber-200 p-4 font-mono text-[12.5px] flex items-start gap-3">
@@ -259,7 +362,7 @@ export const AdminSystem: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-ink">// maintenance_mode</span>
                   <button
-                    onClick={() => handleUpdateSetting('maintenance_mode', !settings.maintenance_mode)}
+                    onClick={() => requestSettingUpdate('maintenance_mode', !settings.maintenance_mode, `${settings.maintenance_mode ? 'Disable' : 'enable'} maintenance mode? Diagram and project writes will ${settings.maintenance_mode ? 'resume' : 'be frozen'}.`, !settings.maintenance_mode)}
                     disabled={isUpdating}
                     className={`px-3 py-1 border text-[10px] uppercase font-bold tracking-wider cursor-pointer transition-colors ${
                       settings.maintenance_mode
@@ -285,7 +388,7 @@ export const AdminSystem: React.FC = () => {
                   {(['open', 'invite_only', 'disabled'] as const).map((policy) => (
                     <button
                       key={policy}
-                      onClick={() => handleUpdateSetting('registration_policy', policy)}
+                      onClick={() => requestSettingUpdate('registration_policy', policy, `Change registration policy to ${policy.replace('_', ' ')}?`, policy === 'disabled')}
                       disabled={isUpdating}
                       className={`py-1.5 px-2 border text-[10px] uppercase font-bold tracking-wider text-center cursor-pointer transition-colors ${
                         settings.registration_policy === policy
@@ -314,7 +417,7 @@ export const AdminSystem: React.FC = () => {
                   {[5, 10, 25, 0].map((limit) => (
                     <button
                       key={limit}
-                      onClick={() => handleUpdateSetting('max_projects_per_user', limit)}
+                      onClick={() => requestSettingUpdate('max_projects_per_user', limit, `Set the maximum projects per user to ${limit === 0 ? 'unlimited' : limit}?`)}
                       disabled={isUpdating}
                       className={`py-1 border text-[10px] font-bold text-center cursor-pointer transition-colors ${
                         settings.max_projects_per_user === limit
@@ -343,7 +446,7 @@ export const AdminSystem: React.FC = () => {
                   {[30, 60, 90, 365].map((days) => (
                     <button
                       key={days}
-                      onClick={() => handleUpdateSetting('audit_retention_days', days)}
+                      onClick={() => requestSettingUpdate('audit_retention_days', days, `Keep audit logs for ${days} days?`)}
                       disabled={isUpdating}
                       className={`py-1 border text-[10px] font-bold text-center cursor-pointer transition-colors ${
                         settings.audit_retention_days === days
@@ -380,7 +483,7 @@ export const AdminSystem: React.FC = () => {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleUpdateSetting('public_sharing', !settings.public_sharing)}
+                  onClick={() => requestSettingUpdate('public_sharing', !settings.public_sharing, `${settings.public_sharing ? 'Disable' : 'enable'} public sharing links?`, settings.public_sharing)}
                   disabled={isUpdating}
                   className={`px-3 py-1 border text-[10px] uppercase font-bold tracking-wider shrink-0 cursor-pointer transition-colors ${
                     settings.public_sharing
@@ -404,7 +507,7 @@ export const AdminSystem: React.FC = () => {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleUpdateSetting('pdf_export', !settings.pdf_export)}
+                  onClick={() => requestSettingUpdate('pdf_export', !settings.pdf_export, `${settings.pdf_export ? 'Disable' : 'enable'} vector PDF export?`, settings.pdf_export)}
                   disabled={isUpdating}
                   className={`px-3 py-1 border text-[10px] uppercase font-bold tracking-wider shrink-0 cursor-pointer transition-colors ${
                     settings.pdf_export
@@ -435,7 +538,7 @@ export const AdminSystem: React.FC = () => {
                       type="text"
                       value={settings.github_repo_url || ''}
                       onChange={(e) => setSettings({ ...settings, github_repo_url: e.target.value })}
-                      onBlur={() => handleUpdateSetting('github_repo_url', settings.github_repo_url || 'https://github.com/kurarensu16/diagrid')}
+                      onBlur={() => requestSettingUpdate('github_repo_url', settings.github_repo_url || 'https://github.com/kurarensu16/diagrid', 'Save the repository URL used by platform GitHub links?')}
                       placeholder="https://github.com/kurarensu16/diagrid"
                       className="px-2.5 py-1.5 border border-line bg-paper-raised text-[12px] font-mono focus:border-blueprint focus:outline-none"
                     />
@@ -490,7 +593,7 @@ export const AdminSystem: React.FC = () => {
                 </span>
 
                 <button
-                  onClick={() => handleUpdateSetting('creator_wallets_enabled', settings.creator_wallets_enabled === false ? true : false)}
+                  onClick={() => requestSettingUpdate('creator_wallets_enabled', settings.creator_wallets_enabled === false ? true : false, `${settings.creator_wallets_enabled === false ? 'Enable' : 'disable'} the Support Creator payment feature globally.`, settings.creator_wallets_enabled !== false)}
                   disabled={isUpdating}
                   className={`px-3 py-1.5 border text-[11px] uppercase font-bold tracking-wider cursor-pointer transition-colors ${
                     settings.creator_wallets_enabled !== false
@@ -717,6 +820,48 @@ export const AdminSystem: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Confirm before any persisted configuration change */}
+      {pendingConfirmation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(21,25,28,0.28)] backdrop-blur-[1px] p-4">
+          <Card variant="blueprint" className="w-full max-w-md p-6 bg-paper shadow-hard">
+            <div className="flex items-start justify-between gap-4 border-b border-line pb-4">
+              <div className="min-w-0">
+                <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">// confirmation_required</span>
+                <h2 className="mt-1 break-words font-mono text-[16px] leading-tight font-bold tracking-tight">{pendingConfirmation.title}</h2>
+              </div>
+              <button
+                onClick={() => setPendingConfirmation(null)}
+                className="p-1 border border-line hover:border-ink cursor-pointer"
+                aria-label="Cancel confirmation"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="py-5 text-[13px] leading-relaxed text-ink-soft">{pendingConfirmation.description}</p>
+            <div className="flex justify-end gap-2 border-t border-line pt-4">
+              <button
+                onClick={() => setPendingConfirmation(null)}
+                className="px-3 py-2 border border-line font-mono text-[11px] uppercase cursor-pointer hover:border-ink"
+              >
+                cancel()
+              </button>
+              <button
+                onClick={confirmPendingAction}
+                disabled={isUpdating}
+                className={`px-3 py-2 border font-mono text-[11px] uppercase cursor-pointer ${
+                  pendingConfirmation.danger
+                    ? 'border-signal text-signal hover:bg-signal hover:text-paper'
+                    : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
+                }`}
+              >
+                <Check className="inline-block w-3.5 h-3.5 mr-1.5 -mt-0.5" />
+                {pendingConfirmation.confirmLabel}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

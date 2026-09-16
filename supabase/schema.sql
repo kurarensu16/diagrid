@@ -99,7 +99,7 @@ drop policy if exists "Enable insert for profiles" on public.profiles;
 
 -- The signup trigger owns inserts. Clients may update only non-privileged fields.
 revoke insert, update on public.profiles from anon, authenticated;
-grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme)
+grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme, is_supporter)
   on public.profiles to authenticated;
 
 drop policy if exists "Admins can delete profiles" on public.profiles;
