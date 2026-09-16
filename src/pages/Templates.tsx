@@ -17,6 +17,11 @@ import {
 
 // Helpful descriptions tailored to each template
 const TEMPLATE_DETAILS: Record<string, { desc: string; nodeCount: string; summary: string }> = {
+  't-blank': {
+    desc: 'Start with an empty canvas and access every shape category from the universal toolbox.',
+    nodeCount: '0 Shapes',
+    summary: 'All toolbox categories'
+  },
   't-erd': {
     desc: 'Relational database schema mapping Users, Projects, and Diagrams with PK/FK column attributes and links.',
     nodeCount: '3 Tables • 2 Relations',
@@ -132,7 +137,8 @@ export const Templates: React.FC = () => {
   });
 
   const tabs: { value: 'all' | Template['type']; label: string }[] = [
-    { value: 'all', label: 'all templates (8)' },
+    { value: 'all', label: 'all templates (9)' },
+    { value: 'blank', label: 'blank canvas' },
     { value: 'erd', label: 'database (erd)' },
     { value: 'flowchart', label: 'flowchart' },
     { value: 'sequence', label: 'sequence' },

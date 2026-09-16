@@ -46,7 +46,7 @@ export interface Diagram {
   id: string;
   project_id: string;
   title: string;
-  type: 'erd' | 'flowchart' | 'sequence' | 'class' | 'gantt' | 'dfd' | 'usecase' | 'activity';
+  type: 'blank' | 'erd' | 'flowchart' | 'sequence' | 'class' | 'gantt' | 'dfd' | 'usecase' | 'activity';
   content: string; // Serialized JSON string: { nodes: CanvasNode[], edges: CanvasEdge[] }
   thumbnail_url?: string | null;
   created_at: string;
@@ -287,6 +287,7 @@ const SEEDS = {
 };
 
 export const TEMPLATES: Template[] = [
+  { id: 't-blank', title: 'Blank Canvas', type: 'blank', content: JSON.stringify({ nodes: [], edges: [], drawings: [] }) },
   { id: 't-erd', title: 'Starter ERD Schema', type: 'erd', content: SEEDS.erd },
   { id: 't-flowchart', title: 'Starter Flowchart Workflow', type: 'flowchart', content: SEEDS.flowchart },
   { id: 't-sequence', title: 'Starter Sequence Interaction', type: 'sequence', content: SEEDS.sequence },
@@ -316,44 +317,14 @@ const setStored = <T>(key: string, value: T): void => {
   localStorage.setItem(key, JSON.stringify(value));
 };
 
-// Seed sample data only for a browser that has never stored projects.
+// Initialize an empty local database for a browser that has never stored projects.
+// Existing local data is preserved, including data created by older versions.
 export const seedInitialData = (): void => {
   // An explicitly empty project list means the user deleted everything.
   if (localStorage.getItem(STORAGE_KEYS.PROJECTS) !== null) return;
-  const projects = getStored<Project[]>(STORAGE_KEYS.PROJECTS, []);
-
-  if (projects.length === 0) {
-    const defaultProject: Project = {
-      id: 'p-default',
-      name: 'Sample Project',
-      description: 'Your first Diagrid workspace housing sample ERD and flowchart templates.',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const initialDiagrams: Diagram[] = [
-      {
-        id: 'd-sample-erd',
-        project_id: 'p-default',
-        title: 'Database Schema',
-        type: 'erd',
-        content: SEEDS.erd,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: 'd-sample-flowchart',
-        project_id: 'p-default',
-        title: 'Application Flow',
-        type: 'flowchart',
-        content: SEEDS.flowchart,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-    ];
-
-    setStored(STORAGE_KEYS.PROJECTS, [defaultProject]);
-    setStored(STORAGE_KEYS.DIAGRAMS, initialDiagrams);
+  setStored(STORAGE_KEYS.PROJECTS, []);
+  if (localStorage.getItem(STORAGE_KEYS.DIAGRAMS) === null) {
+    setStored(STORAGE_KEYS.DIAGRAMS, []);
   }
 };
 

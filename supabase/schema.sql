@@ -28,6 +28,7 @@ end $$;
 
 do $$ begin
   create type diagram_type as enum (
+    'blank',
     'erd',
     'flowchart',
     'sequence',
