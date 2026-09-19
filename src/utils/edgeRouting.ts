@@ -126,6 +126,33 @@ export const buildSvgPath = (pts: { x: number; y: number }[]): string => {
   return path;
 };
 
+export const getEdgePathPoints = (path: string): { x: number; y: number }[] => {
+  return [...path.matchAll(/[ML]\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)]
+    .map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+};
+
+const getManualRoutePath = (
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  waypoints: { x: number; y: number }[]
+): string => {
+  const anchors = [start, ...waypoints, end];
+  const points: { x: number; y: number }[] = [start];
+
+  for (let i = 1; i < anchors.length; i++) {
+    const from = points[points.length - 1];
+    const to = anchors[i];
+    if (from.x !== to.x && from.y !== to.y) {
+      // Run horizontally to the next anchor, then vertically. This prevents a
+      // final manual bend from doubling back over itself and hiding the target leg.
+      points.push({ x: to.x, y: from.y });
+    }
+    points.push(to);
+  }
+
+  return buildSvgPath(simplifyOrthogonalPath(points));
+};
+
 // Place badges on a visible straight run of the routed connector, rather than
 // between the shape centers (which can be far away from a bent route).
 export const getEdgeLabelPosition = (path: string): { x: number; y: number } => {
@@ -332,6 +359,10 @@ export const calculateEdgePath = (
 
   const start = getPortCoords(sourceNode, edge.sourceHandle || 'right');
   const end = getPortCoords(targetNode, edge.targetHandle || 'left');
+
+  if (edge.routeMode === 'manual' && edge.waypoints?.length) {
+    return getManualRoutePath(start, end, edge.waypoints);
+  }
 
   return getOrthogonalRoutePath(
     start,

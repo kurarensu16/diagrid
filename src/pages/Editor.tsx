@@ -11,7 +11,7 @@ import { FeedbackModal } from '../components/ui/FeedbackModal';
 import { useCurrentUser } from '../services/mockAuth';
 import { authService } from '../services/authService';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
-import { calculateEdgePath, getEdgeLabelPosition, getPortCoords } from '../utils/edgeRouting';
+import { calculateEdgePath, getEdgeLabelPosition, getEdgePathPoints, getPortCoords } from '../utils/edgeRouting';
 import { 
   ArrowLeft, 
   Download, 
@@ -447,6 +447,10 @@ export const Editor: React.FC = () => {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+  const edgesRef = useRef(edges);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   // Resize state
   const resizeStateRef = useRef<{
@@ -554,6 +558,20 @@ export const Editor: React.FC = () => {
     port: 'top' | 'bottom' | 'left' | 'right';
   } | null>(null);
   const [tempEdgeEnd, setTempEdgeEnd] = useState({ x: 0, y: 0 });
+
+  // Editable connector routing states.
+  const edgeRouteDragRef = useRef<{
+    edgeId: string;
+    waypointIndex: number;
+    initialWaypoints: { x: number; y: number }[];
+    axis: 'x' | 'y' | 'both';
+  } | null>(null);
+  const edgeReconnectRef = useRef<{ edgeId: string; endpoint: 'source' | 'target' } | null>(null);
+  const [edgeReconnectTarget, setEdgeReconnectTarget] = useState<{
+    nodeId: string;
+    port: 'top' | 'bottom' | 'left' | 'right';
+  } | null>(null);
+  const edgeReconnectTargetRef = useRef<typeof edgeReconnectTarget>(null);
 
   // Refs for tracking mouse offsets
   const panStart = useRef({ x: 0, y: 0 });
@@ -1245,6 +1263,148 @@ export const Editor: React.FC = () => {
   // All diagram surfaces use the same port geometry and obstacle-aware routing.
   const getEdgePath = (edge: CanvasEdge) => calculateEdgePath(edge, nodes);
 
+  const getCanvasPointFromClient = (clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const raw = { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom };
+    if (!isSnapToGrid) return raw;
+    return { x: Math.round(raw.x / 20) * 20, y: Math.round(raw.y / 20) * 20 };
+  };
+
+  const findNearestPort = (point: { x: number; y: number }) => {
+    let nearest: { nodeId: string; port: 'top' | 'bottom' | 'left' | 'right'; distance: number } | null = null;
+    for (const node of nodesRef.current) {
+      const candidate = getClosestPortOnNode(node, point);
+      if (candidate.dist <= 36 && (!nearest || candidate.dist < nearest.distance)) {
+        nearest = { nodeId: node.id, port: candidate.port, distance: candidate.dist };
+      }
+    }
+    return nearest;
+  };
+
+  const handleEdgeRouteDragStart = (
+    e: React.MouseEvent,
+    edge: CanvasEdge,
+    pathPoints: { x: number; y: number }[],
+    segmentIndex?: number,
+    waypointIndex?: number
+  ) => {
+    if (activeMode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pointer = getCanvasPointFromClient(e.clientX, e.clientY);
+    if (!pointer) return;
+
+    const initialWaypoints = edge.routeMode === 'manual' && edge.waypoints?.length
+      ? edge.waypoints.map(point => ({ ...point }))
+      : pathPoints.slice(1, -1).map(point => ({ ...point }));
+
+    let nextIndex = waypointIndex ?? Math.min(Math.max((segmentIndex ?? 1) - 1, 0), Math.max(initialWaypoints.length - 1, 0));
+    if (initialWaypoints.length === 0) {
+      initialWaypoints.push(pointer);
+      nextIndex = 0;
+    }
+
+    const segmentStart = segmentIndex === undefined ? null : pathPoints[segmentIndex];
+    const segmentEnd = segmentIndex === undefined ? null : pathPoints[segmentIndex + 1];
+    const axis = segmentStart && segmentEnd
+      ? (segmentStart.y === segmentEnd.y ? 'y' : 'x')
+      : 'both';
+
+    edgeRouteDragRef.current = { edgeId: edge.id, waypointIndex: nextIndex, initialWaypoints, axis };
+    const nextEdges = edgesRef.current.map(item => item.id === edge.id
+      ? { ...item, routeMode: 'manual' as const, waypoints: initialWaypoints }
+      : item
+    );
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
+    setSelectedEdgeId(edge.id);
+    setSelectedNodeIds([]);
+    setSelectedDrawingId(null);
+  };
+
+  const handleEdgeReconnectStart = (e: React.MouseEvent, edgeId: string, endpoint: 'source' | 'target') => {
+    if (activeMode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    edgeReconnectRef.current = { edgeId, endpoint };
+    edgeReconnectTargetRef.current = null;
+    setEdgeReconnectTarget(null);
+  };
+
+  const updateEditableEdgeInteraction = (clientX: number, clientY: number) => {
+    const point = getCanvasPointFromClient(clientX, clientY);
+    if (!point) return false;
+
+    if (edgeRouteDragRef.current) {
+      const { edgeId, waypointIndex, initialWaypoints, axis } = edgeRouteDragRef.current;
+      const waypoints = initialWaypoints.map((waypoint, index) => index === waypointIndex
+        ? {
+            x: axis === 'y' ? waypoint.x : point.x,
+            y: axis === 'x' ? waypoint.y : point.y
+          }
+        : waypoint
+      );
+      const nextEdges = edgesRef.current.map(edge => edge.id === edgeId
+        ? { ...edge, routeMode: 'manual' as const, waypoints }
+        : edge
+      );
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+      return true;
+    }
+
+    if (edgeReconnectRef.current) {
+      const nearest = findNearestPort(point);
+      edgeReconnectTargetRef.current = nearest ? { nodeId: nearest.nodeId, port: nearest.port } : null;
+      setEdgeReconnectTarget(nearest ? { nodeId: nearest.nodeId, port: nearest.port } : null);
+      return true;
+    }
+
+    return false;
+  };
+
+  const finishEditableEdgeInteraction = () => {
+    if (edgeRouteDragRef.current) {
+      edgeRouteDragRef.current = null;
+      saveHistoryState(nodesRef.current, edgesRef.current, drawings);
+    }
+
+    if (edgeReconnectRef.current) {
+      const { edgeId, endpoint } = edgeReconnectRef.current;
+      const reconnectTarget = edgeReconnectTargetRef.current;
+      if (reconnectTarget) {
+        const nextEdges = edgesRef.current.map(edge => edge.id === edgeId
+          ? {
+              ...edge,
+              [endpoint]: reconnectTarget.nodeId,
+              [endpoint === 'source' ? 'sourceHandle' : 'targetHandle']: reconnectTarget.port,
+              routeMode: 'auto' as const,
+              waypoints: undefined
+            }
+          : edge
+        );
+        edgesRef.current = nextEdges;
+        setEdges(nextEdges);
+        saveHistoryState(nodesRef.current, nextEdges, drawings);
+      }
+      edgeReconnectRef.current = null;
+      edgeReconnectTargetRef.current = null;
+      setEdgeReconnectTarget(null);
+    }
+  };
+
+  const resetSelectedEdgeRoute = () => {
+    if (!selectedEdgeId) return;
+    const nextEdges = edges.map(edge => edge.id === selectedEdgeId
+      ? { ...edge, routeMode: 'auto' as const, waypoints: undefined }
+      : edge
+    );
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
+    saveHistoryState(nodes, nextEdges, drawings);
+  };
+
   // Viewport / drag actions
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.15, 3));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.15, 0.25));
@@ -1732,6 +1892,8 @@ export const Editor: React.FC = () => {
       mouseCanvasPos.current = { x: canvasMouseX, y: canvasMouseY };
     }
 
+    if (updateEditableEdgeInteraction(e.clientX, e.clientY)) return;
+
     // Handle resize dragging first
     if (resizeStateRef.current) {
       handleResizeMouseMove(e.clientX, e.clientY);
@@ -1806,6 +1968,8 @@ export const Editor: React.FC = () => {
   };
 
   const handleMouseUp = () => {
+    finishEditableEdgeInteraction();
+
     // Process marquee bounds check
     if (marqueeStart && marqueeEnd && (activeMode === 'mark' || activeMode === 'select')) {
       const x1 = Math.min(marqueeStart.x, marqueeEnd.x);
@@ -1901,6 +2065,8 @@ export const Editor: React.FC = () => {
   // Global window listeners to ensure drag move & mouseup are tracked even if pointer leaves canvas
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
+      if (updateEditableEdgeInteraction(e.clientX, e.clientY)) return;
+
       if (scrollbarDragRef.current) {
         const s = scrollbarDragRef.current;
         const currentClientPos = s.axis === 'x' ? e.clientX : e.clientY;
@@ -1923,6 +2089,10 @@ export const Editor: React.FC = () => {
     };
 
     const handleWindowMouseUp = () => {
+      if (edgeRouteDragRef.current || edgeReconnectRef.current) {
+        handleMouseUpRef.current();
+        return;
+      }
       if (scrollbarDragRef.current) {
         scrollbarDragRef.current = null;
         setIsScrollbarDragging(false);
@@ -2032,8 +2202,11 @@ export const Editor: React.FC = () => {
     if (!canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
-    const menuX = e.clientX - rect.left;
-    const menuY = e.clientY - rect.top;
+    // Keep the menu inside the canvas viewport, especially near the right/bottom edges.
+    const menuWidth = 220;
+    const menuHeight = targetNodeId ? 360 : 240;
+    const menuX = Math.max(8, Math.min(e.clientX - rect.left, rect.width - menuWidth - 8));
+    const menuY = Math.max(8, Math.min(e.clientY - rect.top, rect.height - menuHeight - 8));
     const canvasMouseX = (e.clientX - rect.left - pan.x) / zoom;
     const canvasMouseY = (e.clientY - rect.top - pan.y) / zoom;
 
@@ -2062,8 +2235,15 @@ export const Editor: React.FC = () => {
         setContextMenu(null);
       }
     };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
     window.addEventListener('mousedown', handleCloseMenu);
-    return () => window.removeEventListener('mousedown', handleCloseMenu);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('mousedown', handleCloseMenu);
+      window.removeEventListener('keydown', handleEscape);
+    };
   }, [contextMenu]);
 
   // Sidebar controls mutations
@@ -2768,11 +2948,16 @@ export const Editor: React.FC = () => {
                 </div>
               </div>
 
-              {/* Instructions footnote */}
-              <div className="font-mono text-[10px] text-ink-soft leading-relaxed border-t-2 border-ink pt-3 mt-4">
-                <div>• Click any button to add shape</div>
-                <div>• Connect via vertex circle ports</div>
-                <div>• Edit properties in right sidebar</div>
+              {/* Toolbox guidance */}
+              <div className="border-t-2 border-ink pt-3 mt-4">
+                <div className="font-mono text-[10px] text-blueprint uppercase tracking-wider font-bold mb-2">
+                  Toolbox guide
+                </div>
+                <div className="border border-line bg-paper-raised px-2.5 py-2.5 text-[10px] font-mono leading-relaxed text-ink-soft space-y-1.5">
+                  <p><span className="font-bold text-ink">Add:</span> choose a shape to place it on the canvas.</p>
+                  <p><span className="font-bold text-ink">Connect:</span> drag from a shape port to another port.</p>
+                  <p><span className="font-bold text-ink">Edit:</span> right-click a shape or connector for its settings.</p>
+                </div>
               </div>
             </div>
           )}
@@ -3672,6 +3857,7 @@ export const Editor: React.FC = () => {
                 const isSelected = selectedEdgeId === edge.id;
                 const path = getEdgePath(edge);
                 if (!path) return null;
+                const pathPoints = getEdgePathPoints(path);
 
                 const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
                 const labelY = routeLabelY - 8;
@@ -3728,6 +3914,122 @@ export const Editor: React.FC = () => {
                         />
                       );
                     })()}
+                    {isSelected && (
+                      <path
+                        d={path}
+                        fill="none"
+                        stroke="#00A8FF"
+                        strokeWidth="1.25"
+                        strokeDasharray="4 3"
+                        strokeLinecap="round"
+                        className="pointer-events-none"
+                      />
+                    )}
+                    {isSelected && pathPoints.length >= 2 && (
+                      <g>
+                        {/* Drag either endpoint onto a shape port to reconnect the line. */}
+                        {([
+                          { point: pathPoints[0], endpoint: 'source' as const, port: edge.sourceHandle || 'right' },
+                          { point: pathPoints[pathPoints.length - 1], endpoint: 'target' as const, port: edge.targetHandle || 'left' }
+                        ]).map(({ point, endpoint, port }) => {
+                          const offset = port === 'top' ? { x: 0, y: -10 } : port === 'bottom' ? { x: 0, y: 10 } : port === 'left' ? { x: -10, y: 0 } : { x: 10, y: 0 };
+                          return (
+                            <circle
+                              key={`endpoint-${edge.id}-${endpoint}`}
+                              cx={point.x + offset.x}
+                              cy={point.y + offset.y}
+                              r="5"
+                              fill="#00A8FF"
+                              stroke={dc.paperRaised}
+                              strokeWidth="2"
+                              className="cursor-crosshair"
+                              onMouseDown={(e) => handleEdgeReconnectStart(e, edge.id, endpoint)}
+                            />
+                          );
+                        })}
+                        {edgeReconnectTarget && (() => {
+                          const targetNode = nodes.find(node => node.id === edgeReconnectTarget.nodeId);
+                          if (!targetNode) return null;
+                          const targetPoint = getPortCoords(targetNode, edgeReconnectTarget.port);
+                          return (
+                            <circle
+                              cx={targetPoint.x}
+                              cy={targetPoint.y}
+                              r="8"
+                              fill="none"
+                              stroke={dc.signal}
+                              strokeWidth="2"
+                              strokeDasharray="3 2"
+                              className="pointer-events-none"
+                            />
+                          );
+                        })()}
+
+                        {/* Corners can be moved directly; auto-routes become manual when edited. */}
+                        {(edge.routeMode === 'manual' && edge.waypoints?.length ? edge.waypoints : pathPoints.slice(1, -1)).map((point, index) => (
+                          <circle
+                            key={`corner-${edge.id}-${index}`}
+                            cx={point.x}
+                            cy={point.y}
+                            r="5"
+                            fill="#00A8FF"
+                            stroke={dc.paperRaised}
+                            strokeWidth="2"
+                            className="cursor-move"
+                            onMouseDown={(e) => handleEdgeRouteDragStart(e, edge, pathPoints, undefined, index)}
+                          />
+                        ))}
+
+                        {/* Mid-segment handles create or reposition an editable route control. */}
+                        {pathPoints.slice(0, -1).map((point, index) => {
+                          const next = pathPoints[index + 1];
+                          if (Math.hypot(next.x - point.x, next.y - point.y) < 28) return null;
+                          return (
+                            <circle
+                              key={`segment-${edge.id}-${index}`}
+                              cx={(point.x + next.x) / 2}
+                              cy={(point.y + next.y) / 2}
+                              r="4.5"
+                              fill="#00A8FF"
+                              stroke={dc.paperRaised}
+                              strokeWidth="2"
+                              className={point.y === next.y ? 'cursor-ns-resize' : 'cursor-ew-resize'}
+                              onMouseDown={(e) => handleEdgeRouteDragStart(e, edge, pathPoints, index)}
+                            />
+                          );
+                        })}
+                        {edge.routeMode === 'manual' && (
+                          <g
+                            className="cursor-pointer"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              resetSelectedEdgeRoute();
+                            }}
+                          >
+                            <rect
+                              x={labelX - 25}
+                              y={labelY + 14}
+                              width="50"
+                              height="20"
+                              rx="10"
+                              fill={dc.paperRaised}
+                              stroke="#00A8FF"
+                              strokeWidth="1.25"
+                            />
+                            <text
+                              x={labelX}
+                              y={labelY + 27.5}
+                              fill={dc.blueprint}
+                              textAnchor="middle"
+                              className="font-mono text-[9px] font-bold pointer-events-none"
+                            >
+                              RESET
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    )}
                     {edge.label && (
                       <g className="pointer-events-none">
                         <rect
@@ -4187,6 +4489,8 @@ export const Editor: React.FC = () => {
           {contextMenu && (
             <div 
               ref={contextMenuRef}
+              onMouseDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.stopPropagation()}
               style={{ 
                 left: `${contextMenu.x}px`, 
                 top: `${contextMenu.y}px` 
@@ -4260,49 +4564,6 @@ export const Editor: React.FC = () => {
                     <span className="text-blueprint font-bold text-[10px]">⇊</span>
                   </button>
 
-                  {/* Accent color quick editor option */}
-                  <div className="border-t border-line my-1"></div>
-                  <div className="px-3.5 py-1 font-bold text-ink-soft text-[9px] uppercase tracking-wider">// shadow_accent</div>
-                  <button
-                    onClick={() => {
-                      updateSelectedNodeProperty('shadowAccent', '#1E5C8C');
-                      setContextMenu(null);
-                    }}
-                    className="w-full text-left px-3.5 py-1 hover:bg-paper flex items-center gap-2 cursor-pointer"
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full bg-blueprint border border-ink"></span>
-                    <span>BLUEPRINT</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      updateSelectedNodeProperty('shadowAccent', '#D45B33');
-                      setContextMenu(null);
-                    }}
-                    className="w-full text-left px-3.5 py-1 hover:bg-paper flex items-center gap-2 cursor-pointer"
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full bg-signal border border-ink"></span>
-                    <span>SIGNAL</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      updateSelectedNodeProperty('shadowAccent', '#15191C');
-                      setContextMenu(null);
-                    }}
-                    className="w-full text-left px-3.5 py-1 hover:bg-paper flex items-center gap-2 cursor-pointer"
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full bg-ink border border-ink"></span>
-                    <span>DARK_INK</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      updateSelectedNodeProperty('shadowAccent', 'none');
-                      setContextMenu(null);
-                    }}
-                    className="w-full text-left px-3.5 py-1 hover:bg-paper flex items-center gap-2 cursor-pointer text-ink-soft"
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full border border-ink/50 flex items-center justify-center text-[8px]">✕</span>
-                    <span>NO_SHADOW</span>
-                  </button>
                 </>
               ) : (
                 <>
@@ -5180,6 +5441,21 @@ export const Editor: React.FC = () => {
                     className="w-full border-2 border-ink bg-paper px-3 py-2 text-[13px] font-mono focus:border-blueprint focus:outline-none"
                     placeholder="e.g. 1:N, places, contains"
                   />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 border border-line bg-paper-raised px-2.5 py-2">
+                  <div className="font-mono text-[10px]">
+                    <div className="font-bold text-ink">ROUTE: {activeEdge.routeMode === 'manual' ? 'MANUAL' : 'AUTO'}</div>
+                    <div className="text-ink-soft mt-0.5">Drag the blue line handles to edit.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resetSelectedEdgeRoute}
+                    disabled={activeEdge.routeMode !== 'manual'}
+                    className="shrink-0 border border-ink px-2 py-1 font-mono text-[10px] font-bold hover:bg-paper disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Reset route
+                  </button>
                 </div>
 
                 {/* ERD Cardinality Quick Presets */}

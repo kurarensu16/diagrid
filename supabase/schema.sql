@@ -98,8 +98,9 @@ drop policy if exists "Admins can insert or delete profiles" on public.profiles;
 drop policy if exists "Enable insert for profiles" on public.profiles;
 
 -- The signup trigger owns inserts. Clients may update only non-privileged fields.
+-- Supporter status is changed exclusively by the admin-only RPC below.
 revoke insert, update on public.profiles from anon, authenticated;
-grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme, is_supporter)
+grant update (name, avatar_type, preset_avatar, avatar_url, bio, theme)
   on public.profiles to authenticated;
 
 drop policy if exists "Admins can delete profiles" on public.profiles;
@@ -638,6 +639,37 @@ begin
   return jsonb_build_object('success', true);
 end;
 $$;
+
+-- Admin-only supporter badge management. Client-side claims are recorded as
+-- feedback and must be reviewed before this function is called.
+create or replace function public.set_user_supporter_status(
+  target_user_id uuid,
+  target_is_supporter boolean
+)
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Unauthorized: Admin role required';
+  end if;
+
+  update public.profiles
+  set is_supporter = target_is_supporter,
+      updated_at = now()
+  where id = target_user_id;
+
+  if not found then
+    raise exception 'User profile not found';
+  end if;
+
+  return jsonb_build_object('success', true);
+end;
+$$;
+
+revoke all on function public.set_user_supporter_status(uuid, boolean) from public;
+grant execute on function public.set_user_supporter_status(uuid, boolean) to authenticated;
 
 -- ==============================================================================
 -- 15. AUDIT LOGS TABLE & TRIGGER AUTOMATION

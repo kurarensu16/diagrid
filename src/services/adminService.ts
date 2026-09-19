@@ -257,13 +257,10 @@ export const adminService = {
     }
 
     try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
-          is_supporter: isSupporter,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
+      const { error: updateError } = await supabase.rpc('set_user_supporter_status', {
+        target_user_id: userId,
+        target_is_supporter: isSupporter,
+      });
 
       if (updateError) throw updateError;
 
