@@ -1244,8 +1244,8 @@ export const Settings: React.FC = () => {
       <SupportModal
         isOpen={isSupportModalOpen}
         onClose={() => setIsSupportModalOpen(false)}
-        onClaimSuccess={() => {
-          setStatusMsg({ text: 'Supporter perks unlocked! Thank you for supporting Diagrid.', type: 'success' });
+        onClaimSubmitted={() => {
+          setStatusMsg({ text: 'Support request sent. Your badge will appear after payment verification.', type: 'success' });
         }}
       />
     </div>

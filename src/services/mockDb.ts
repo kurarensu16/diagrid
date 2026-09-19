@@ -40,6 +40,8 @@ export interface CanvasEdge {
   arrow?: 'end' | 'none' | 'both';
   sourceMarker?: EdgeMarkerType;
   targetMarker?: EdgeMarkerType;
+  routeMode?: 'auto' | 'manual';
+  waypoints?: { x: number; y: number }[];
 }
 
 export interface Diagram {

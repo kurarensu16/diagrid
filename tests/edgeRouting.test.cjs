@@ -88,3 +88,28 @@ test('connector labels sit on the routed line when an edge bends around shapes',
       : label.y === point.y && label.x >= Math.min(previous.x, point.x) && label.x <= Math.max(previous.x, point.x);
   }));
 });
+
+test('manual connector waypoints persist as an orthogonal route', () => {
+  const nodes = [card('source', 100, 100), card('target', 700, 400)];
+  const waypoint = { x: 420, y: 620 };
+  const points = pointsOf(calculateEdgePath({
+    source: 'source',
+    target: 'target',
+    sourceHandle: 'right',
+    targetHandle: 'left',
+    routeMode: 'manual',
+    waypoints: [waypoint],
+  }, nodes));
+
+  assert.ok(points.some(point => point.x === waypoint.x && point.y === waypoint.y));
+  const targetPort = getPortCoords(nodes[1], 'left');
+  assert.equal(points.at(-1).x, targetPort.x);
+  assert.equal(points.at(-1).y, targetPort.y);
+  // The final run must enter the target from the waypoint's horizontal level,
+  // rather than doubling back over the same vertical segment.
+  assert.equal(points.at(-2).x, targetPort.x);
+  assert.equal(points.at(-2).y, waypoint.y);
+  for (let i = 1; i < points.length; i++) {
+    assert.ok(points[i - 1].x === points[i].x || points[i - 1].y === points[i].y);
+  }
+});

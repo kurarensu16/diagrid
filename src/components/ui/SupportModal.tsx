@@ -16,10 +16,10 @@ import { adminService, type PlatformSettings, type CreatorWallet } from '../../s
 interface SupportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onClaimSuccess?: () => void;
+  onClaimSubmitted?: () => void;
 }
 
-export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onClaimSuccess }) => {
+export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onClaimSubmitted }) => {
   const user = useCurrentUser();
   const [copied, setCopied] = useState(false);
   const [referenceCode, setReferenceCode] = useState('');
@@ -83,12 +83,16 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
   const handleClaimBadge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!referenceCode.trim()) return;
+    if (settings.creator_wallets_enabled === false) {
+      setClaimStatus('NOTICE: Supporter claims are not available right now.');
+      return;
+    }
 
     setIsSubmitting(true);
     setClaimStatus(null);
 
     try {
-      await adminService.submitFeedback({
+      const result = await adminService.submitFeedback({
         userEmail: user?.email || 'supporter@diagrid.dev',
         type: 'feature',
         rating: 5,
@@ -96,15 +100,13 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
         message: `[SUPPORTER CLAIM] Wallet/Bank: ${currentWallet.name} | Reference Code: ${referenceCode.trim()} (Sent by ${user?.email || 'Anonymous'})`,
       });
 
-      if (user?.id) {
-        await adminService.setUserSupporterStatus(user.id, true);
-        if (onClaimSuccess) onClaimSuccess();
-      }
+      if (result.error) throw new Error(result.error);
 
-      setClaimStatus(`SUCCESS: Reference logged! Your [❤️ SUPPORTER] badge is activated.`);
+      onClaimSubmitted?.();
+      setClaimStatus('REQUEST LOGGED: An administrator will verify your payment before activating the badge.');
       setReferenceCode('');
     } catch {
-      setClaimStatus('NOTICE: Reference logged. An administrator will verify your badge.');
+      setClaimStatus('ERROR: We could not log your reference. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -126,7 +128,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
               <h2 className="text-[17px] font-bold tracking-tight font-mono flex items-center gap-2 text-ink">
                 support_creator()
                 <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500 uppercase tracking-widest font-bold">
-                  PERKS_UNLOCKED
+                  REVIEW_REQUIRED
                 </span>
               </h2>
               <p className="text-[11px] text-ink-soft font-mono mt-0.5">
@@ -242,7 +244,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
             </div>
             <ul className="text-ink-soft space-y-1.5 pl-6 list-disc text-[12px]">
               <li>
-                <strong className="text-ink">[❤️ SUPPORTER] Badge</strong> displayed beside your handle across headers and comments.
+                <strong className="text-ink">[❤️ SUPPORTER] Badge</strong> displayed beside your handle after your payment is verified.
               </li>
               <li>
                 Directly covers Supabase database hosting, backups, and new canvas tools.
@@ -255,7 +257,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
             <div>
               <span className="font-mono font-bold text-[12px] text-ink flex items-center gap-1.5">
                 <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
-                claim_supporter_badge()
+                request_supporter_badge()
               </span>
               <p className="text-[11px] text-ink-soft font-mono mt-0.5">
                 // sent a tip? enter your transfer reference or transaction code below
@@ -277,7 +279,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
                 className="px-4 py-2 border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 font-mono text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
               >
                 <Send className="w-3 h-3" />
-                {isSubmitting ? 'submitting...' : 'claim_badge()'}
+                {isSubmitting ? 'submitting...' : 'submit_request()'}
               </button>
             </div>
           </form>
