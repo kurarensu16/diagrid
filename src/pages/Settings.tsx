@@ -79,7 +79,16 @@ export const Settings: React.FC = () => {
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
-  const [isSupportEnabled, setIsSupportEnabled] = useState(false);
+  const [isSupportEnabled, setIsSupportEnabled] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('diagrid_platform_settings');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return parsed.creator_wallets_enabled !== false;
+      }
+    } catch {}
+    return true;
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -743,36 +752,68 @@ export const Settings: React.FC = () => {
             )}
           </Card>
 
-          {/* Support Creator Card in Profile */}
+          {/* Support Creator Card in Profile (Option 3: Conditional based on supporter status) */}
           {isSupportEnabled && (
-            <Card variant="blueprint" className="p-6 border-rose-500/40 bg-rose-500/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 font-mono">
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 border border-rose-500 bg-rose-500/10 flex items-center justify-center shrink-0 text-rose-600 dark:text-rose-400">
-                  <Heart className="w-5 h-5 fill-rose-600 text-rose-600" />
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[14px] font-bold text-ink flex items-center gap-2">
-                    support_creator()
-                    <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500 font-bold uppercase">
-                      [❤️ SUPPORTER_PERKS]
+            currentUser?.isSupporter ? (
+              <Card variant="blueprint" className="p-5 border-rose-500/40 bg-rose-500/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 font-mono">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-9 h-9 border border-rose-500 bg-rose-500/10 flex items-center justify-center shrink-0 text-rose-600 dark:text-rose-400">
+                    <Heart className="w-4.5 h-4.5 fill-rose-600 text-rose-600" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[13px] font-bold text-ink flex items-center gap-2">
+                      supporter_perk_active
+                      <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500 font-bold uppercase">
+                        [❤️ ACTIVE SUPPORTER]
+                      </span>
                     </span>
-                  </span>
-                  <p className="text-[11.5px] text-ink-soft font-sans max-w-lg">
-                    Diagrid is built by independent developers. Scan our digital wallet QR to support database costs and unlock your exclusive supporter badge!
-                  </p>
+                    <p className="text-[11.5px] text-ink-soft font-sans max-w-lg">
+                      Thank you for supporting Diagrid! Your supporter badge is active on your profile, navigation, and export signatures.
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setIsSupportModalOpen(true)}
-                className="shrink-0 border-rose-500 text-rose-700 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[12px] flex items-center gap-1.5 px-4 py-2"
-              >
-                <Heart className="w-3.5 h-3.5 fill-current" />
-                open_qr_wallet()
-              </Button>
-            </Card>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setIsSupportModalOpen(true)}
+                  className="shrink-0 border-line hover:border-rose-500 text-ink-soft hover:text-rose-600 font-bold text-[11px] flex items-center gap-1.5 px-3 py-1.5"
+                  title="View digital wallet QR code"
+                >
+                  <Heart className="w-3 h-3 fill-current text-rose-600" />
+                  view_wallet_qr()
+                </Button>
+              </Card>
+            ) : (
+              <Card variant="blueprint" className="p-6 border-rose-500/40 bg-rose-500/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 font-mono">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-10 h-10 border border-rose-500 bg-rose-500/10 flex items-center justify-center shrink-0 text-rose-600 dark:text-rose-400">
+                    <Heart className="w-5 h-5 fill-rose-600 text-rose-600" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[14px] font-bold text-ink flex items-center gap-2">
+                      support_creator()
+                      <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500 font-bold uppercase">
+                        [❤️ SUPPORTER_PERKS]
+                      </span>
+                    </span>
+                    <p className="text-[11.5px] text-ink-soft font-sans max-w-lg">
+                      Diagrid is built by independent developers. Scan our digital wallet QR to support database costs and unlock your exclusive supporter badge!
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setIsSupportModalOpen(true)}
+                  className="shrink-0 border-rose-500 text-rose-700 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[12px] flex items-center gap-1.5 px-4 py-2"
+                >
+                  <Heart className="w-3.5 h-3.5 fill-current" />
+                  open_qr_wallet()
+                </Button>
+              </Card>
+            )
           )}
         </form>
       )}

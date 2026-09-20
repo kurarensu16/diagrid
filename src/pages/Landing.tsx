@@ -451,11 +451,6 @@ export const Landing: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-2 flex-1 border-b-2 border-ink bg-paper">
         {/* Left text column */}
         <div className="p-8 sm:p-12 lg:p-20 border-b-2 lg:border-b-0 lg:border-r-2 border-ink flex flex-col justify-center bg-paper">
-          <div className="font-mono text-[11.5px] text-blueprint tracking-wider mb-4 inline-flex items-center gap-2 bg-[#EBF3FA] dark:bg-[#152332] border border-blueprint px-3 py-1 self-start font-bold">
-            <span className="w-2 h-2 bg-blueprint inline-block animate-pulse"></span>
-            <span>Easy Drag-and-Drop Diagramming</span>
-          </div>
-
           <h1 className="text-[40px] sm:text-[48px] lg:text-[54px] leading-[1.06] font-bold tracking-tight mb-5 text-ink">
             Draw neat diagrams <span className="text-blueprint underline decoration-2 underline-offset-4">in seconds</span>.<br />
             No tangled lines.
@@ -480,21 +475,6 @@ export const Landing: React.FC = () => {
             >
               Browse Templates
             </Link>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-6 mt-10 pt-6 border-t-2 border-ink border-dashed font-mono text-[11px] text-ink font-bold">
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-blueprint" />
-              Works offline in your browser
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-blueprint" />
-              No signup or credit card needed
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-blueprint" />
-              Crystal-clear image downloads
-            </span>
           </div>
         </div>
 
@@ -927,17 +907,17 @@ export const Landing: React.FC = () => {
         </div>
       </section>
 
-      {/* 2. Highlights Ribbon in Plain English */}
+      {/* 2. Highlights Ribbon in Clear Plain Terms */}
       <div className="border-b-2 border-ink bg-[#101417] text-[#9AA5A0] px-8 py-3.5 overflow-x-auto select-none">
         <div className="flex items-center gap-8 min-w-max font-mono text-[12px] mx-auto justify-between max-w-6xl">
           <div className="flex items-center gap-2 text-white font-bold">
             <Sliders className="w-4 h-4 text-blueprint" />
-            <span>Why it works better:</span>
+            <span>Why Diagrid:</span>
           </div>
-          <div>Lines: <strong className="text-blueprint font-bold">Straight Right Angles (No Spaghetti)</strong></div>
-          <div>Alignment: <strong className="text-white font-bold">Snaps into Place Automatically</strong></div>
-          <div>Privacy: <strong className="text-[#38A169] font-bold">Saved 100% on Your Computer</strong></div>
-          <div>Export: <strong className="text-white font-bold">Sharp Images for School & Work</strong></div>
+          <div>Clean Lines: <strong className="text-blueprint font-bold">Smart Auto-Routed Lines</strong></div>
+          <div>Alignment: <strong className="text-white font-bold">Snaps Neat to Grid</strong></div>
+          <div>Saving: <strong className="text-[#38A169] font-bold">Works Online & Offline</strong></div>
+          <div>Export: <strong className="text-white font-bold">Instant High-Res Downloads</strong></div>
         </div>
       </div>
 

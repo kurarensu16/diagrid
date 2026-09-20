@@ -26,8 +26,10 @@ import {
   Globe,
   FileText,
   Save,
-  ShieldAlert
+  ShieldAlert,
+  Heart
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { adminService, type AdminFeedback } from '../../services/adminService';
@@ -63,6 +65,7 @@ export const AdminFeedbackPage: React.FC = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(5);
+  const [pendingClaimsCount, setPendingClaimsCount] = useState<number>(0);
 
   useEffect(() => {
     loadFeedback();
@@ -71,11 +74,14 @@ export const AdminFeedbackPage: React.FC = () => {
   const loadFeedback = async () => {
     setIsRefreshing(true);
     try {
-      const data = await adminService.getFeedback();
-      setFeedbackList(data);
+      const rawData = await adminService.getFeedback();
+      const productData = rawData.filter(f => !f.message.includes('[SUPPORTER CLAIM]'));
+      const claimsCount = rawData.filter(f => f.message.includes('[SUPPORTER CLAIM]') && f.status === 'new').length;
+      setFeedbackList(productData);
+      setPendingClaimsCount(claimsCount);
       // Keep inspectingItem in sync if open
       if (inspectingItem) {
-        const updated = data.find(f => f.id === inspectingItem.id);
+        const updated = productData.find(f => f.id === inspectingItem.id);
         if (updated) {
           setInspectingItem(updated);
           setInspectingNotes(updated.adminNotes || '');
@@ -240,6 +246,23 @@ export const AdminFeedbackPage: React.FC = () => {
         <div className="bg-blueprint/10 border border-blueprint text-blueprint px-4 py-2.5 font-mono text-[12px] flex items-center gap-2">
           <Check className="w-4 h-4 shrink-0" />
           <span>STATUS: {actionNotice}</span>
+        </div>
+      )}
+
+      {/* Supporter Claims Notice if any pending */}
+      {pendingClaimsCount > 0 && (
+        <div className="p-3.5 border border-rose-500/40 bg-rose-500/5 font-mono text-[11px] flex items-center justify-between">
+          <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center gap-2">
+            <Heart className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
+            {pendingClaimsCount} contribution claim(s) awaiting verification in supporters queue
+          </span>
+          <Link
+            to="/admin/supporters"
+            className="text-rose-600 hover:underline font-bold flex items-center gap-1"
+          >
+            <span>manage_supporters()</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
         </div>
       )}
 

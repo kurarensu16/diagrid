@@ -19,9 +19,9 @@ import {
   Plus,
   Trash2,
   QrCode,
-  Image as ImageIcon,
   Check,
-  X
+  X,
+  Upload
 } from 'lucide-react';
 
 type PendingConfirmation = {
@@ -187,8 +187,8 @@ export const AdminSystem: React.FC = () => {
     const newWallet: CreatorWallet = {
       id: `w-${Date.now()}`,
       name: presetName,
-      account_name: 'Diagrid Creator',
-      account_number: '0912 345 6789',
+      account_name: '',
+      account_number: '',
       qr_url: '',
       enabled: true,
     };
@@ -204,24 +204,41 @@ export const AdminSystem: React.FC = () => {
     });
   };
 
-  const handleUpdateWalletField = (walletId: string, field: keyof CreatorWallet, value: any) => {
-    const currentWallets = settings.creator_wallets || [];
-    const updated = currentWallets.map((w) =>
-      w.id === walletId ? { ...w, [field]: value } : w
-    );
-    setSettings((prev) => ({ ...prev, creator_wallets: updated }));
+  const handleQrFileUpload = (walletId: string, file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid image file (PNG, JPG, SVG, WEBP).');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('Image size exceeds 2MB limit. Please upload a smaller QR code image.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      if (!dataUrl) return;
+
+      const currentWallets = settings.creator_wallets || [];
+      const updated = currentWallets.map((w) =>
+        w.id === walletId ? { ...w, qr_url: dataUrl } : w
+      );
+      setSettings((prev) => ({ ...prev, creator_wallets: updated }));
+      const saved = await handleUpdateSetting('creator_wallets', updated);
+      if (saved) showToast('QR code image uploaded and saved successfully.');
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleSaveWalletChanges = async () => {
-    requestConfirmation({
-      title: 'save_wallet_changes()',
-      description: 'Save the edited wallet names, account details, and QR image URLs?',
-      confirmLabel: 'save_wallets()',
-      action: async () => {
-        const saved = await handleUpdateSetting('creator_wallets', settings.creator_wallets || []);
-        if (saved) showToast('Saved all wallet configurations.');
-      },
-    });
+  const handleRemoveQrCode = async (walletId: string) => {
+    const currentWallets = settings.creator_wallets || [];
+    const updated = currentWallets.map((w) =>
+      w.id === walletId ? { ...w, qr_url: '' } : w
+    );
+    setSettings((prev) => ({ ...prev, creator_wallets: updated }));
+    const saved = await handleUpdateSetting('creator_wallets', updated);
+    if (saved) showToast('QR code image removed.');
   };
 
   const handleDeleteWallet = async (walletId: string) => {
@@ -682,71 +699,70 @@ export const AdminSystem: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Wallet Input Fields */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-ink-soft uppercase text-[10px]">// provider_name</label>
-                        <input
-                          type="text"
-                          value={wallet.name}
-                          onChange={(e) => handleUpdateWalletField(wallet.id, 'name', e.target.value)}
-                          onBlur={handleSaveWalletChanges}
-                          placeholder="e.g. GCash / Maya"
-                          className="px-2.5 py-1.5 border border-line bg-paper text-[12px] font-mono focus:border-rose-600 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <label className="text-ink-soft uppercase text-[10px]">// account_holder_name</label>
-                        <input
-                          type="text"
-                          value={wallet.account_name || ''}
-                          onChange={(e) => handleUpdateWalletField(wallet.id, 'account_name', e.target.value)}
-                          onBlur={handleSaveWalletChanges}
-                          placeholder="e.g. Diagrid Creator"
-                          className="px-2.5 py-1.5 border border-line bg-paper text-[12px] font-mono focus:border-rose-600 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <label className="text-ink-soft uppercase text-[10px]">// account_number_or_phone</label>
-                        <input
-                          type="text"
-                          value={wallet.account_number}
-                          onChange={(e) => handleUpdateWalletField(wallet.id, 'account_number', e.target.value)}
-                          onBlur={handleSaveWalletChanges}
-                          placeholder="e.g. 0912 345 6789"
-                          className="px-2.5 py-1.5 border border-line bg-paper text-[12px] font-mono focus:border-rose-600 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="md:col-span-2 lg:col-span-3 flex flex-col sm:flex-row items-start sm:items-center gap-3 border-t border-line/60 pt-2.5">
-                        <div className="flex-1 flex flex-col gap-1 w-full">
-                          <label className="text-ink-soft uppercase text-[10px] flex items-center gap-1.5">
-                            <ImageIcon className="w-3 h-3 text-rose-500" />
-                            // qr_code_image_url (optional)
-                          </label>
-                          <input
-                            type="text"
-                            value={wallet.qr_url || ''}
-                            onChange={(e) => handleUpdateWalletField(wallet.id, 'qr_url', e.target.value)}
-                            onBlur={handleSaveWalletChanges}
-                            placeholder="https://... or data:image/png;base64,..."
-                            className="px-2.5 py-1.5 border border-line bg-paper text-[12px] font-mono focus:border-rose-600 focus:outline-none w-full"
+                    {/* QR Code File Upload Section */}
+                    <div className="flex flex-col sm:flex-row items-center gap-5 p-4 border border-line/70 bg-paper-raised">
+                      {/* Left: QR Code Preview */}
+                      <div className="w-28 h-28 border-2 border-rose-600 bg-white p-2 flex items-center justify-center shrink-0 shadow-sm">
+                        {wallet.qr_url ? (
+                          <img
+                            src={wallet.qr_url}
+                            alt={`${wallet.name} QR Code`}
+                            className="w-full h-full object-contain"
                           />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-ink-soft gap-1 text-center">
+                            <QrCode className="w-10 h-10 text-rose-500/70" />
+                            <span className="text-[9px] font-mono font-bold uppercase text-ink-soft">
+                              NO QR CODE
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Upload controls and info */}
+                      <div className="flex-1 flex flex-col gap-2.5 w-full">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-bold text-ink text-[13px] font-mono flex items-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5 text-rose-600" />
+                            qr_code_file_upload
+                          </span>
+                          <span className="text-[11px] text-ink-soft font-mono">
+                            Upload your {wallet.name} merchant or personal QR code image (PNG, JPG, SVG, WEBP, max 2MB).
+                          </span>
                         </div>
 
-                        {/* Thumbnail QR Preview */}
-                        <div className="shrink-0 flex items-center gap-2">
-                          <div className="w-10 h-10 border border-line bg-white flex items-center justify-center overflow-hidden">
-                            {wallet.qr_url ? (
-                              <img src={wallet.qr_url} alt="QR" className="w-full h-full object-contain" />
-                            ) : (
-                              <QrCode className="w-6 h-6 text-rose-500" />
-                            )}
-                          </div>
-                          <span className="text-[10px] text-ink-soft">
-                            {wallet.qr_url ? 'Custom QR Active' : 'Default QR Icon'}
+                        <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                          {/* File upload button */}
+                          <label className="flex items-center gap-1.5 px-3 py-1.5 border border-rose-600 text-rose-600 hover:bg-rose-600 hover:text-white bg-rose-500/5 font-mono text-[11px] font-bold cursor-pointer transition-colors shadow-sm">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>{wallet.qr_url ? 'replace_qr_code()' : 'upload_qr_code()'}</span>
+                            <input
+                              type="file"
+                              accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleQrFileUpload(wallet.id, file);
+                                e.target.value = '';
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+
+                          {/* Remove button if QR exists */}
+                          {wallet.qr_url && (
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveQrCode(wallet.id)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 border border-line hover:border-signal hover:text-signal text-ink-soft font-mono text-[11px] font-bold cursor-pointer transition-colors"
+                              title="Remove this QR code image"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              remove_qr()
+                            </button>
+                          )}
+
+                          <span className="text-[10px] font-mono text-ink-soft">
+                            {wallet.qr_url ? '● Custom QR uploaded & active' : '○ No file uploaded yet'}
                           </span>
                         </div>
                       </div>

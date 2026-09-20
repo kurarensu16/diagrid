@@ -3,14 +3,14 @@ import { Card } from '../../components/ui/Card';
 import { adminService, type StorageTelemetry } from '../../services/adminService';
 import { 
   Database, 
-  ShieldCheck, 
   Activity, 
   RefreshCw, 
   Trash2, 
   HardDrive, 
   CheckCircle2, 
-  Lock,
   Sparkles,
+  FileText,
+  Folder,
   Server
 } from 'lucide-react';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -24,7 +24,7 @@ export const AdminStorage: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    loadTelemetry();
+    void loadTelemetry();
   }, []);
 
   const loadTelemetry = async () => {
@@ -57,10 +57,6 @@ export const AdminStorage: React.FC = () => {
     }
   };
 
-  const handleVerifyRLS = () => {
-    showNotice('RLS Integrity Audit PASSED: 100% of tenant tables enforce Row-Level Security isolation.');
-  };
-
   const showNotice = (msg: string) => {
     setActionNotice(msg);
     setTimeout(() => setActionNotice(null), 4000);
@@ -70,7 +66,7 @@ export const AdminStorage: React.FC = () => {
     return (
       <div className="p-12 flex flex-col items-center justify-center gap-3 text-ink-soft font-mono">
         <RefreshCw className="w-6 h-6 animate-spin text-blueprint" />
-        <span>// querying_storage_telemetry_and_rls_policies()...</span>
+        <span>// querying_storage_telemetry()...</span>
       </div>
     );
   }
@@ -83,8 +79,9 @@ export const AdminStorage: React.FC = () => {
     usedPercent: 0,
     status: 'HEALTHY' as const,
     tables: [],
-    rlsCoveragePercent: 100,
-    activeTenantCount: 0,
+    totalDiagrams: 0,
+    totalProjects: 0,
+    totalUsers: 0,
   };
 
   return (
@@ -94,13 +91,13 @@ export const AdminStorage: React.FC = () => {
         <div>
           <h1 className="text-[32px] font-bold tracking-tight">storage_telemetry</h1>
           <p className="text-[13px] text-ink-soft font-mono mt-1">
-            // monitor database capacity, table distribution, and zero-knowledge tenant isolation policies
+            // monitor database capacity, table distribution, and storage utilization
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={loadTelemetry}
+            onClick={() => void loadTelemetry()}
             disabled={isLoading}
             className="flex items-center gap-1.5 font-mono text-[11px] border border-line px-3 py-1.5 hover:border-ink hover:bg-paper-raised transition-colors cursor-pointer"
             title="Refresh database telemetry metrics"
@@ -137,68 +134,68 @@ export const AdminStorage: React.FC = () => {
           {/* Progress Bar */}
           <div className="w-full h-2 bg-paper border border-line overflow-hidden">
             <div 
-              style={{ width: `${Math.max(data.usedPercent, 2)}%` }} 
+              style={{ width: `${Math.max(data.usedPercent, 1.5)}%` }} 
               className="h-full bg-blueprint transition-all duration-500" 
             />
           </div>
           <div className="flex justify-between items-center font-mono text-[10px] text-ink-soft">
             <span>{data.usedPercent}% utilized</span>
-            <span className="text-emerald-800 font-bold border border-emerald-600 px-1 py-0.2 bg-emerald-500/10">
+            <span className="text-emerald-800 dark:text-emerald-400 font-bold border border-emerald-600/40 px-1 py-0.2 bg-emerald-500/10">
               [{data.status}]
             </span>
           </div>
         </Card>
 
-        {/* Card 2: RLS Security Audit */}
+        {/* Card 2: Total Stored Diagrams */}
         <Card variant="blueprint" className="p-5 flex flex-col gap-2.5">
           <div className="flex items-center justify-between font-mono text-[11px] text-ink-soft">
-            <span>RLS_SECURITY_AUDIT</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-800" />
+            <span>STORED_DIAGRAMS</span>
+            <FileText className="w-4 h-4 text-blueprint" />
           </div>
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[26px] font-bold font-mono text-emerald-800">
-              {data.rlsCoveragePercent}%
+            <span className="text-[26px] font-bold font-mono text-ink">
+              {data.totalDiagrams}
             </span>
-            <span className="font-mono text-[11px] text-emerald-800 font-bold">COMPLIANT</span>
+            <span className="font-mono text-[11px] text-ink-soft">diagrams</span>
           </div>
           <p className="font-mono text-[10.5px] text-ink-soft leading-tight">
-            Tenant isolation active on 100% of user data tables. Zero-knowledge privacy enforced.
+            Vector nodes, connector edges, and serialized JSON canvas state payloads.
           </p>
         </Card>
 
-        {/* Card 3: Postgres Latency */}
+        {/* Card 3: Active Projects */}
+        <Card variant="signal" className="p-5 flex flex-col gap-2.5">
+          <div className="flex items-center justify-between font-mono text-[11px] text-ink-soft">
+            <span>PROJECT_CONTAINERS</span>
+            <Folder className="w-4 h-4 text-signal" />
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[26px] font-bold font-mono text-signal">
+              {data.totalProjects}
+            </span>
+            <span className="font-mono text-[11px] text-ink-soft">workspaces</span>
+          </div>
+          <p className="font-mono text-[10.5px] text-ink-soft leading-tight">
+            User project namespaces grouping multiple architecture and flow diagrams.
+          </p>
+        </Card>
+
+        {/* Card 4: Database Latency */}
         <Card variant="ink" className="p-5 flex flex-col gap-2.5">
           <div className="flex items-center justify-between font-mono text-[11px] text-ink-soft">
-            <span>POSTGRES_LATENCY</span>
+            <span>DATABASE_LATENCY</span>
             <Activity className="w-4 h-4 text-ink" />
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className="text-[26px] font-bold font-mono text-ink">
               {latencyMs}ms
             </span>
-            <span className="font-mono text-[10px] text-emerald-800 border border-emerald-600 px-1 py-0.2 bg-emerald-500/10 font-bold">
+            <span className="font-mono text-[10px] text-emerald-800 dark:text-emerald-400 border border-emerald-600/40 px-1 py-0.2 bg-emerald-500/10 font-bold">
               OPERATIONAL
             </span>
           </div>
           <p className="font-mono text-[10.5px] text-ink-soft leading-tight">
-            Supabase Managed PostgreSQL with automatic failover and disk encryption (AES-256).
-          </p>
-        </Card>
-
-        {/* Card 4: Tenant Workspaces */}
-        <Card variant="signal" className="p-5 flex flex-col gap-2.5">
-          <div className="flex items-center justify-between font-mono text-[11px] text-ink-soft">
-            <span>ISOLATED_TENANTS</span>
-            <Lock className="w-4 h-4 text-signal" />
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-[26px] font-bold font-mono text-signal">
-              {data.activeTenantCount}
-            </span>
-            <span className="font-mono text-[11px] text-ink-soft">profiles</span>
-          </div>
-          <p className="font-mono text-[10.5px] text-ink-soft leading-tight">
-            Independent cryptographic tenant spaces with separate Row-Level Security policies.
+            Supabase Managed PostgreSQL response latency for transactional queries.
           </p>
         </Card>
       </div>
@@ -209,7 +206,7 @@ export const AdminStorage: React.FC = () => {
           <div>
             <h2 className="text-[18px] font-bold tracking-tight">table_distribution & storage_weight</h2>
             <p className="text-[11px] text-ink-soft font-mono mt-0.5">
-              // high-level database schema metrics aggregated without accessing user contents
+              // database table footprints and estimated disk usage
             </p>
           </div>
           <div className="font-mono text-[11px] text-ink-soft flex items-center gap-1.5">
@@ -225,7 +222,6 @@ export const AdminStorage: React.FC = () => {
                 <th className="p-3.5 uppercase tracking-wide">database_table</th>
                 <th className="p-3.5 uppercase tracking-wide text-center">total_rows</th>
                 <th className="p-3.5 uppercase tracking-wide text-center">disk_weight</th>
-                <th className="p-3.5 uppercase tracking-wide">rls_security_policy</th>
                 <th className="p-3.5 uppercase tracking-wide">table_purpose</th>
               </tr>
             </thead>
@@ -242,17 +238,6 @@ export const AdminStorage: React.FC = () => {
                   <td className="p-3.5 text-center text-ink-soft font-bold">
                     {t.estimatedFormatted}
                   </td>
-                  <td className="p-3.5">
-                    <span className={`px-2 py-0.5 border text-[10px] uppercase font-bold tracking-wide ${
-                      t.rlsStatus === 'ENFORCED_TENANT_ISOLATED'
-                        ? 'border-emerald-600 text-emerald-800 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40'
-                        : t.rlsStatus === 'ENFORCED_ADMIN_ONLY'
-                        ? 'border-[#D45B33] text-[#D45B33] dark:text-[#F78166] bg-[#FDF2EC] dark:bg-[#2C1610]'
-                        : 'border-[#1E5C8C] text-[#1E5C8C] dark:text-[#388BFD] bg-[#EBF3FA] dark:bg-[#152332]'
-                    }`}>
-                      {t.rlsStatus.replace(/_/g, ' ')}
-                    </span>
-                  </td>
                   <td className="p-3.5 text-ink-soft text-[11px]">
                     {t.description}
                   </td>
@@ -263,7 +248,7 @@ export const AdminStorage: React.FC = () => {
         </div>
       </Card>
 
-      {/* Storage Maintenance & Privacy Guarantees */}
+      {/* Storage Maintenance & Guidelines */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Maintenance Utilities */}
         <Card variant="blueprint" className="p-6 flex flex-col justify-between gap-4">
@@ -285,35 +270,27 @@ export const AdminStorage: React.FC = () => {
               <Trash2 className="w-3.5 h-3.5" />
               prune_old_audit_logs(30d)
             </button>
-
-            <button
-              onClick={handleVerifyRLS}
-              className="flex items-center gap-1.5 font-mono text-[11px] border border-blueprint text-blueprint hover:bg-blueprint hover:text-paper px-3.5 py-2 transition-colors cursor-pointer uppercase font-bold"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              verify_rls_policies()
-            </button>
           </div>
         </Card>
 
-        {/* Privacy & Zero-Knowledge Guarantee Card */}
+        {/* Storage Guidelines Card */}
         <Card variant="ink" className="p-6 flex flex-col gap-3">
           <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-blueprint" />
+            <HardDrive className="w-4 h-4 text-blueprint" />
             <h3 className="font-mono text-[15px] font-bold tracking-tight">
-              zero_knowledge_privacy_spec
+              storage_guidelines
             </h3>
           </div>
 
           <div className="font-mono text-[11.5px] text-ink-soft flex flex-col gap-2 leading-relaxed">
             <div className="border-b border-line border-dashed pb-2">
-              <strong className="text-ink">1. Zero Admin Snooping:</strong> Diagrid administrators do not read or browse private user diagram schemas, entity names, or text notes.
+              <strong className="text-ink">1. Free Tier Quota:</strong> Standard capacity is capped at 500.00 MB across all JSON canvas state payloads and relational tables.
             </div>
             <div className="border-b border-line border-dashed pb-2">
-              <strong className="text-ink">2. Row-Level Isolation:</strong> Supabase PostgreSQL enforces <code className="text-blueprint bg-blueprint/10 px-1">auth.uid() = user_id</code> at the engine level.
+              <strong className="text-ink">2. Audit Retention:</strong> Pruning audit logs older than 30 days regularly frees table weight without impacting active diagrams or user workspaces.
             </div>
             <div>
-              <strong className="text-ink">3. Transport Security:</strong> 100% of telemetry and canvas state is transmitted over TLS 1.3 encryption.
+              <strong className="text-ink">3. JSON Serialization:</strong> Diagrams are serialized into compact node/edge structures to minimize disk storage overhead.
             </div>
           </div>
         </Card>
@@ -328,7 +305,6 @@ export const AdminStorage: React.FC = () => {
         message="Prune audit event logs older than 30 days?"
         description="This will permanently delete historical audit log records older than 30 days to free up PostgreSQL storage. Active user projects and diagrams will NOT be affected."
         confirmText="Confirm Prune"
-        danger={true}
       />
     </div>
   );

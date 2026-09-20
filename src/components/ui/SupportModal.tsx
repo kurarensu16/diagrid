@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, 
-  Copy, 
-  Check, 
   Heart, 
   Send, 
   ShieldCheck, 
-  QrCode,
   Sparkles,
-  Wallet
+  Wallet,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { useCurrentUser } from '../../services/mockAuth';
 import { adminService, type PlatformSettings, type CreatorWallet } from '../../services/adminService';
@@ -21,22 +20,28 @@ interface SupportModalProps {
 
 export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onClaimSubmitted }) => {
   const user = useCurrentUser();
-  const [copied, setCopied] = useState(false);
   const [referenceCode, setReferenceCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState<string>('w-1');
-  const [settings, setSettings] = useState<PlatformSettings>({
-    maintenance_mode: false,
-    registration_policy: 'open',
-    max_projects_per_user: 10,
-    public_sharing: true,
-    pdf_export: false,
-    audit_retention_days: 30,
-    creator_wallets: [
-      { id: 'w-1', name: 'GCash', account_name: 'Diagrid Creator', account_number: '0912 345 6789', qr_url: '', enabled: true },
-      { id: 'w-2', name: 'Maya', account_name: 'Diagrid Creator', account_number: '0912 345 6789', qr_url: '', enabled: true },
-    ],
+  const [settings, setSettings] = useState<PlatformSettings>(() => {
+    try {
+      const cached = localStorage.getItem('diagrid_platform_settings');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return {
+      maintenance_mode: false,
+      registration_policy: 'open',
+      max_projects_per_user: 10,
+      public_sharing: true,
+      pdf_export: false,
+      audit_retention_days: 30,
+      creator_wallets: [
+        { id: 'w-1', name: 'GCash', account_name: '', account_number: '', qr_url: '', enabled: true },
+        { id: 'w-2', name: 'Maya', account_name: '', account_number: '', qr_url: '', enabled: true },
+      ],
+    };
   });
 
   useEffect(() => {
@@ -51,6 +56,16 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+
   if (!isOpen) return null;
 
   const activeWallets: CreatorWallet[] = (settings.creator_wallets && settings.creator_wallets.length > 0)
@@ -59,8 +74,8 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
         {
           id: 'w-1',
           name: settings.creator_wallet_name || 'GCash',
-          account_name: 'Diagrid Creator',
-          account_number: settings.creator_wallet_account || '0912 345 6789',
+          account_name: '',
+          account_number: '',
           qr_url: settings.creator_wallet_qr_url || '',
           enabled: true
         }
@@ -70,15 +85,9 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
     activeWallets.find(w => w.id === selectedWalletId) || activeWallets[0] || {
       id: 'default',
       name: 'Digital Wallet',
-      account_number: '0912 345 6789',
+      account_number: '',
       enabled: true
     };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(currentWallet.account_number.replace(/[^0-9+]/g, ''));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
 
   const handleClaimBadge = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,42 +205,51 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
               </span>
             </div>
 
-            {/* High-contrast QR Code Representation */}
-            <div className="w-48 h-48 border-2 border-rose-600 bg-white p-3 flex flex-col items-center justify-center shadow-md relative">
-              {currentWallet.qr_url ? (
-                <img 
-                  src={currentWallet.qr_url} 
-                  alt={`${currentWallet.name} QR Code`} 
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-rose-600 gap-1.5 text-center">
-                  <QrCode className="w-28 h-28 text-rose-600" strokeWidth={1.5} />
-                  <span className="font-mono text-[10px] font-bold text-rose-600 uppercase tracking-wider">
-                    SCAN QR TO PAY
-                  </span>
+            {/* Image Container: Flexibly sized to fit tall standees or square QRs cleanly */}
+            {currentWallet.qr_url ? (
+              <div className="flex flex-col items-center gap-2">
+                <div 
+                  className="relative group cursor-zoom-in"
+                  onClick={() => setIsFullscreen(true)}
+                  title="Click to view full screen"
+                >
+                  <div className="w-full max-w-[280px] bg-white border border-rose-500/50 p-2 flex items-center justify-center shadow-md transition-all group-hover:border-rose-600">
+                    <img 
+                      src={currentWallet.qr_url} 
+                      alt={`${currentWallet.name} QR Code`} 
+                      className="w-full h-auto max-h-[420px] object-contain"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-ink/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <span className="bg-ink text-paper font-mono text-[11px] font-bold px-2.5 py-1 border border-ink flex items-center gap-1.5 shadow-lg">
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      view_fullscreen()
+                    </span>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Account Details & One-Click Copy */}
-            <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-              <span className="text-[14px] font-bold font-mono text-ink break-all">
-                {currentWallet.account_number}
-                {currentWallet.account_name ? ` (${currentWallet.account_name})` : ''}
-              </span>
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1 border border-line hover:border-rose-600 hover:text-rose-600 font-mono text-[11px] font-bold cursor-pointer transition-colors text-ink-soft bg-paper mt-1"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  fullscreen_qr()
+                </button>
+              </div>
+            ) : (
+              <div className="w-full max-w-[280px] border border-dashed border-line p-8 flex flex-col items-center justify-center text-ink-soft gap-2 text-center">
+                <span className="font-mono text-[11px] text-ink-soft uppercase font-bold">
+                  // no_qr_code_uploaded
+                </span>
+                <span className="font-mono text-[10px] text-ink-soft">
+                  Please upload a QR code image in system settings.
+                </span>
+              </div>
+            )}
 
-              <button
-                onClick={handleCopy}
-                className={`w-full py-1.5 border font-mono text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                  copied 
-                    ? 'border-emerald-600 bg-emerald-600 text-white' 
-                    : 'border-rose-600 text-rose-600 hover:bg-rose-600 hover:text-white bg-rose-50 dark:bg-rose-950/30'
-                }`}
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? 'copied_to_clipboard' : 'copy_account_number()'}
-              </button>
+            <div className="flex flex-col items-center gap-1 font-mono text-[11px] text-ink-soft">
+              <span>// scan the qr code above with your {currentWallet.name} app</span>
             </div>
 
           </div>
@@ -297,6 +315,52 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onC
           </button>
         </div>
       </div>
+      {/* Fullscreen QR Lightbox Modal */}
+      {isFullscreen && currentWallet.qr_url && (
+        <div 
+          className="fixed inset-0 z-[100] bg-ink/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 sm:p-8 animate-fadeIn"
+          onClick={() => setIsFullscreen(false)}
+        >
+          <div 
+            className="relative max-h-[92vh] max-w-[92vw] bg-white border-2 border-rose-600 shadow-2xl p-4 flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Lightbox Header */}
+            <div className="w-full flex items-center justify-between pb-3 border-b border-line mb-3 font-mono text-[12px]">
+              <span className="font-bold text-ink flex items-center gap-2">
+                <span className="px-2 py-0.5 border border-rose-600 bg-rose-500/10 text-rose-600 uppercase font-bold">
+                  {currentWallet.name}
+                </span>
+                // qr_code_fullscreen
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="p-1.5 border border-line hover:border-ink bg-paper text-ink transition-colors cursor-pointer flex items-center gap-1 font-mono text-[11px] font-bold"
+                title="Close fullscreen view (Esc)"
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+                close_fullscreen()
+              </button>
+            </div>
+
+            {/* Lightbox Large Image */}
+            <div className="flex items-center justify-center overflow-auto max-h-[78vh]">
+              <img 
+                src={currentWallet.qr_url} 
+                alt={`${currentWallet.name} Fullscreen QR`}
+                className="w-auto h-auto max-h-[75vh] max-w-[85vw] object-contain" 
+              />
+            </div>
+
+            {/* Lightbox Footer */}
+            <div className="w-full pt-3 border-t border-line mt-3 flex items-center justify-between font-mono text-[11px] text-ink-soft">
+              <span>// scan directly from your screen with your mobile banking or e-wallet app</span>
+              <span className="hidden sm:inline">[press ESC or click outside to exit]</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

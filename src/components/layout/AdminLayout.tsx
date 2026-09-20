@@ -10,6 +10,7 @@ import {
   LogOut,
   ShieldAlert,
   MessageSquare,
+  Heart,
   Menu,
   X
 } from 'lucide-react';
@@ -33,6 +34,7 @@ export const AdminLayout: React.FC = () => {
     { label: 'users', path: '/admin/users', icon: Users },
     { label: 'storage', path: '/admin/storage', icon: Database },
     { label: 'feedback', path: '/admin/feedback', icon: MessageSquare },
+    { label: 'supporters', path: '/admin/supporters', icon: Heart },
     { label: 'activity_log', path: '/admin/activity', icon: Activity },
     { label: 'system_settings', path: '/admin/system', icon: Sliders },
   ];
