@@ -10,22 +10,37 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { FeedbackModal } from '../components/ui/FeedbackModal';
 import { useCurrentUser } from '../services/mockAuth';
 import { authService } from '../services/authService';
+import {
+  type FreehandDrawing,
+  pointsToSmoothSvgPath,
+  type NodeDragState,
+  type ResizeState,
+  UNIVERSAL_TOOLBOX_GROUPS,
+  getMinDimensions,
+  isResizable,
+  getNodeDimensions,
+  dc,
+} from '../types/canvas';
+import { calculateEdgePath } from '../utils/edgeRouting';
+import { FreehandLayer } from '../components/canvas/FreehandLayer';
+import { EdgeLayer } from '../components/canvas/EdgeLayer';
+import { PropertiesSidebar } from '../components/canvas/PropertiesSidebar';
+import { CanvasToolbar } from '../components/canvas/CanvasToolbar';
+import { Minimap } from '../components/canvas/Minimap';
+import { useCanvasHistory, type CanvasSnapshot } from '../hooks/canvas/useCanvasHistory';
+import { useCanvasSelection } from '../hooks/canvas/useCanvasSelection';
+import { useCanvasTransform } from '../hooks/canvas/useCanvasTransform';
+import { useEdgeInteractions, getClosestPortOnNode } from '../hooks/canvas/useEdgeInteractions';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
-import { calculateEdgePath, getEdgeLabelPosition, getEdgePathPoints, getPortCoords } from '../utils/edgeRouting';
 import { 
+  Plus,
+  Sliders,
   ArrowLeft, 
   Download, 
   Share2,
   MessageSquare,
-  ZoomIn, 
-  ZoomOut, 
   Check, 
   Trash2,
-  MousePointer,
-  Pencil,
-  Hand,
-  Undo,
-  Redo,
   PanelLeftClose,
   PanelLeftOpen,
   Square,
@@ -34,121 +49,14 @@ import {
   Database,
   Wand2,
   Code,
-  Sliders,
-  Plus,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  Bold,
-  ChevronsUp,
-  ChevronsDown,
-  ChevronUp,
-  ChevronDown,
-  Palette,
   Type,
   Copy,
   FileCode,
   Sparkles,
-  Eraser,
-  Highlighter,
-  Maximize2,
   Edit3,
-  Grid,
-  Magnet,
   AlertTriangle,
   User
 } from 'lucide-react';
-
-interface FreehandDrawing {
-  id: string;
-  path: string; // SVG Path string: M x y Q ...
-  color?: string;
-  width?: number;
-  opacity?: number;
-  tool?: 'pen' | 'highlighter';
-}
-
-// Convert discrete points to a smooth SVG Bézier curve path using midpoint quadratic Bézier interpolation
-const pointsToSmoothSvgPath = (points: { x: number; y: number }[]): string => {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y} L ${points[0].x} ${points[0].y}`;
-  if (points.length === 2) {
-    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-  }
-
-  let path = `M ${points[0].x} ${points[0].y}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const xc = (points[i].x + points[i + 1].x) / 2;
-    const yc = (points[i].y + points[i + 1].y) / 2;
-    path += ` Q ${points[i].x} ${points[i].y}, ${xc} ${yc}`;
-  }
-  const last = points[points.length - 1];
-  const secondLast = points[points.length - 2];
-  path += ` Q ${secondLast.x} ${secondLast.y}, ${last.x} ${last.y}`;
-  return path;
-};
-
-const PENCIL_COLOR_PRESETS = [
-  { label: 'Signal Orange', value: '#D45B33' },
-  { label: 'Blueprint Ink', value: '#15191C' },
-  { label: 'Technical Blue', value: '#1E5C8C' },
-  { label: 'Accent Teal', value: '#1A6B54' },
-  { label: 'Alert Red', value: '#C0392B' },
-  { label: 'Highlight Yellow', value: '#F59E0B' },
-];
-
-const PENCIL_WIDTH_PRESETS = [
-  { label: 'Fine', value: 1.5 },
-  { label: 'Medium', value: 2.5 },
-  { label: 'Thick', value: 4.5 },
-  { label: 'Marker', value: 8 },
-];
-
-const AVAILABLE_SHAPE_TYPES: { type: CanvasNode['type']; label: string }[] = [
-  { type: 'process', label: 'Process (Rectangle)' },
-  { type: 'decision', label: 'Decision (Diamond)' },
-  { type: 'terminal', label: 'Terminal (Pill)' },
-  { type: 'text', label: 'Text Box / Note' },
-  { type: 'table', label: 'Table (ERD)' },
-  { type: 'dfd-store', label: 'Data Store (DFD)' },
-  { type: 'dfd-entity', label: 'Entity (DFD)' },
-  { type: 'dfd-process', label: 'Process (DFD)' },
-  { type: 'usecase-actor', label: 'Actor (Stick)' },
-  { type: 'usecase-oval', label: 'Use Case (Oval)' },
-  { type: 'usecase-boundary', label: 'Boundary (Box)' },
-  { type: 'activity-action', label: 'Action (Rounded)' },
-];
-
-const UNIVERSAL_TOOLBOX_GROUPS: { label: string; items: { type: CanvasNode['type']; label: string }[] }[] = [
-  { label: 'Flowchart', items: [
-    { type: 'process', label: 'Process Step (Box)' },
-    { type: 'decision', label: 'Decision (Diamond)' },
-    { type: 'terminal', label: 'Start / End (Oval)' },
-  ] },
-  { label: 'Database / ERD', items: [{ type: 'table', label: 'Database Table' }] },
-  { label: 'Data Flow (DFD)', items: [
-    { type: 'dfd-entity', label: 'External Entity' },
-    { type: 'dfd-process', label: 'Transform Process' },
-    { type: 'dfd-store', label: 'Data Store' },
-  ] },
-  { label: 'Use Case', items: [
-    { type: 'usecase-actor', label: 'User Actor' },
-    { type: 'usecase-oval', label: 'Use Case Oval' },
-    { type: 'usecase-boundary', label: 'System Boundary' },
-  ] },
-  { label: 'Activity', items: [
-    { type: 'activity-start', label: 'Start State' },
-    { type: 'activity-action', label: 'Action Step' },
-    { type: 'activity-decision', label: 'Decision Diamond' },
-    { type: 'activity-fork', label: 'Fork / Join Bar' },
-    { type: 'activity-end', label: 'Final State' },
-  ] },
-  { label: 'Sequence', items: [
-    { type: 'process', label: 'Participant' },
-    { type: 'sequence-activation', label: 'Activation Bar' },
-  ] },
-  { label: 'Annotation', items: [{ type: 'text', label: 'Text Box / Note' }] },
-];
 
 const getToolIcon = (type: CanvasNode['type']): React.ReactNode => {
   const iconClass = 'w-3.5 h-3.5 text-blueprint';
@@ -173,224 +81,6 @@ const getToolIcon = (type: CanvasNode['type']): React.ReactNode => {
   }
 };
 
-const FILL_COLOR_PRESETS = [
-  { label: 'Paper', value: '#FFFFFF', bg: '#FFFFFF' },
-  { label: 'Blueprint', value: '#EFF6FF', bg: '#EFF6FF' },
-  { label: 'Signal', value: '#FEF2F2', bg: '#FEF2F2' },
-  { label: 'Amber', value: '#FFFBEB', bg: '#FFFBEB' },
-  { label: 'Emerald', value: '#F0FDF4', bg: '#F0FDF4' },
-  { label: 'Purple', value: '#FAF5FF', bg: '#FAF5FF' },
-  { label: 'Clear', value: 'transparent', bg: 'transparent' },
-];
-
-const SHADOW_COLOR_PRESETS = [
-  { label: 'Blue', value: '#1E5C8C', bg: '#1E5C8C' },
-  { label: 'Red', value: '#D45B33', bg: '#D45B33' },
-  { label: 'Dark', value: '#15191C', bg: '#15191C' },
-  { label: 'Green', value: '#059669', bg: '#059669' },
-  { label: 'Purple', value: '#7C3AED', bg: '#7C3AED' },
-  { label: 'Amber', value: '#D97706', bg: '#D97706' },
-  { label: 'None', value: 'none', bg: '#D1D5DB' },
-];
-
-/** Standard blueprint drafting color tokens for diagrams (diagrams remain clean & unaffected by UI themes) */
-const dc = {
-  ink: '#15191C',
-  inkSoft: '#4A5359',
-  paper: '#F6F7F5',
-  paperRaised: '#FFFFFF',
-  blueprint: '#1E5C8C',
-  signal: '#D45B33',
-  borderLine: '#D7DBD8',
-};
-
-export const CrowsFootVisualIcon: React.FC<{ type: EdgeMarkerType; isSelected?: boolean }> = ({ type, isSelected }) => {
-  // Use CSS currentColor so parent's text color determines the stroke (inherits theme)
-  const svgClass = `w-10 h-3.5 ${isSelected ? 'text-paper' : 'text-ink'}`;
-  const stroke = 'currentColor';
-  const circleFill = isSelected ? 'currentColor' : 'var(--bg-paper-raised)';
-
-  if (type === 'none') {
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-      </svg>
-    );
-  }
-  if (type === 'arrow') {
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="36" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <path d="M 28 2.5 L 37 7 L 28 11.5 z" fill={stroke} />
-      </svg>
-    );
-  }
-  if (type === 'zero-one') {
-    // Zero or one: horizontal line with an open circle
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <circle cx="28" cy="7" r="4" fill={circleFill} stroke={stroke} strokeWidth="1.75" />
-      </svg>
-    );
-  }
-  if (type === 'many') {
-    // Many: line branching into 3 prongs
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <line x1="22" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-        <line x1="22" y1="7" x2="38" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === 'one') {
-    // One: single vertical crossbar
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <line x1="30" y1="1.5" x2="30" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === 'one-only') {
-    // One (and only one): two vertical crossbars
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <line x1="24" y1="1.5" x2="24" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-        <line x1="31" y1="1.5" x2="31" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === 'zero-many') {
-    // Zero or many: circle followed by 3 prongs
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <circle cx="19" cy="7" r="3.5" fill={circleFill} stroke={stroke} strokeWidth="1.75" />
-        <line x1="22.5" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-        <line x1="22.5" y1="7" x2="38" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === 'one-many') {
-    // One or many: vertical bar followed by 3 prongs
-    return (
-      <svg className={svgClass} viewBox="0 0 40 14">
-        <line x1="2" y1="7" x2="38" y2="7" stroke={stroke} strokeWidth="1.75" />
-        <line x1="21" y1="1.5" x2="21" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-        <line x1="22" y1="7" x2="38" y2="1.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-        <line x1="22" y1="7" x2="38" y2="12.5" stroke={stroke} strokeWidth="1.75" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return null;
-};
-
-export const CARDINALITY_OPTIONS: { value: EdgeMarkerType; label: string; title: string }[] = [
-  { value: 'zero-one', label: 'Zero or one', title: 'Zero or One (Circle)' },
-  { value: 'many', label: 'Many', title: 'Many (Crow\'s Foot Prongs)' },
-  { value: 'one', label: 'One', title: 'One (Single Bar)' },
-  { value: 'one-only', label: 'One (only)', title: 'One and only one (Two Bars)' },
-  { value: 'zero-many', label: 'Zero or many', title: 'Zero or Many (Circle + Prongs)' },
-  { value: 'one-many', label: 'One or many', title: 'One or Many (Bar + Prongs)' },
-  { value: 'none', label: 'Plain line', title: 'Plain Line' },
-  { value: 'arrow', label: 'Arrow', title: 'Directed Arrow' },
-];
-
-export const getMarkerUrl = (
-  markerType: EdgeMarkerType | undefined,
-  fallbackArrow: 'end' | 'none' | 'both' | undefined,
-  isStart: boolean,
-  isSelected: boolean
-): string | undefined => {
-  const suffix = isSelected ? '-selected' : '';
-
-  if (markerType) {
-    if (markerType === 'none') return undefined;
-    if (markerType === 'arrow') return `url(#arrow${suffix})`;
-    if (markerType === 'one') return `url(#crows-one${suffix})`;
-    if (markerType === 'one-only') return `url(#crows-one-only${suffix})`;
-    if (markerType === 'zero-one') return `url(#crows-zero-one${suffix})`;
-    if (markerType === 'many') return `url(#crows-many${suffix})`;
-    if (markerType === 'one-many') return `url(#crows-one-many${suffix})`;
-    if (markerType === 'zero-many') return `url(#crows-zero-many${suffix})`;
-  }
-
-  if (fallbackArrow === 'both') {
-    return `url(#arrow${suffix})`;
-  }
-  if (fallbackArrow === 'none') {
-    return undefined;
-  }
-  if (isStart) {
-    return undefined;
-  }
-  return `url(#arrow${suffix})`;
-};
-
-// Default dimensions per shape type
-export const getDefaultDimensions = (node: CanvasNode): { width: number; height: number } => {
-  if (node.type === 'table') {
-    const fieldCount = node.fields?.length || 0;
-    return { width: 180, height: Math.max(48, 32 + fieldCount * 24) };
-  }
-  if (node.type === 'decision') return { width: 96, height: 96 };
-  if (node.type === 'terminal') return { width: 120, height: 38 };
-  if (node.type === 'dfd-store') return { width: 140, height: 48 };
-  if (node.type === 'dfd-entity') return { width: 120, height: 56 };
-  if (node.type === 'dfd-process') return { width: 130, height: 64 };
-  if (node.type === 'usecase-actor') return { width: 70, height: 90 };
-  if (node.type === 'usecase-oval') return { width: 130, height: 52 };
-  if (node.type === 'usecase-boundary') return { width: 360, height: 300 };
-  if (node.type === 'sequence-activation') return { width: 20, height: 80 };
-  if (node.type === 'activity-start') return { width: 32, height: 32 };
-  if (node.type === 'activity-end') return { width: 36, height: 36 };
-  if (node.type === 'activity-action') return { width: 150, height: 48 };
-  if (node.type === 'activity-decision') return { width: 96, height: 96 };
-  if (node.type === 'activity-fork') return { width: 200, height: 8 };
-  if (node.type === 'text') return { width: 140, height: 40 };
-  return { width: 140, height: 48 };
-};
-
-// Minimum dimensions per shape type
-export const getMinDimensions = (node: CanvasNode): { width: number; height: number } => {
-  if (node.type === 'table') {
-    const fieldCount = node.fields?.length || 0;
-    return { width: 120, height: Math.max(48, 32 + fieldCount * 24) };
-  }
-  if (node.type === 'decision' || node.type === 'activity-decision') return { width: 48, height: 48 };
-  if (node.type === 'activity-start') return { width: 20, height: 20 };
-  if (node.type === 'activity-end') return { width: 24, height: 24 };
-  if (node.type === 'activity-fork') return { width: 60, height: 6 };
-  if (node.type === 'usecase-actor') return { width: 40, height: 50 };
-  if (node.type === 'sequence-activation') return { width: 14, height: 40 };
-  if (node.type === 'text') return { width: 40, height: 24 };
-  return { width: 60, height: 28 };
-};
-
-// Check if shape type supports resizing
-export const isResizable = (type: string): boolean => {
-  return !['activity-start', 'activity-end'].includes(type);
-};
-
-export const getNodeDimensions = (node: CanvasNode): { width: number; height: number } => {
-  const defaults = getDefaultDimensions(node);
-  if (node.type === 'table') {
-    const fieldCount = node.fields?.length || 0;
-    const minRequiredHeight = 32 + fieldCount * 24;
-    return {
-      width: node.customWidth ?? defaults.width,
-      height: Math.max(node.customHeight ?? 0, minRequiredHeight)
-    };
-  }
-  return {
-    width: node.customWidth ?? defaults.width,
-    height: node.customHeight ?? defaults.height
-  };
-};
-
 export const Editor: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -400,11 +90,7 @@ export const Editor: React.FC = () => {
   const [edges, setEdges] = useState<CanvasEdge[]>([]);
   const [drawings, setDrawings] = useState<FreehandDrawing[]>([]);
 
-  // Clipboard state for nodes and edges
-  const [clipboard, setClipboard] = useState<{
-    nodes: CanvasNode[];
-    edges: CanvasEdge[];
-  } | null>(null);
+
 
   // Context Menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -418,10 +104,7 @@ export const Editor: React.FC = () => {
   // Interaction modes: select (V), mark marquee (M), draw pencil (P), pan canvas (H)
   const [activeMode, setActiveMode] = useState<'select' | 'mark' | 'draw' | 'pan'>('select');
 
-  // Multi-selection state
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+
 
   // Pencil Tool Submodes & Styles
   const [pencilTool, setPencilTool] = useState<'pen' | 'highlighter' | 'eraser'>('pen');
@@ -432,16 +115,6 @@ export const Editor: React.FC = () => {
   const DRAG_THRESHOLD = 4; // px distance threshold before drag begins
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
 
-  interface NodeDragState {
-    isDown: boolean;
-    isDragging: boolean;
-    startClientPos: { x: number; y: number };
-    primaryNodeId: string;
-    initialPositions: Record<string, { x: number; y: number }>;
-    activeSelectionIds: string[];
-    wasAlreadySelected: boolean;
-    isShift: boolean;
-  }
   const nodeDragStateRef = useRef<NodeDragState | null>(null);
   const nodesRef = useRef(nodes);
   useEffect(() => {
@@ -451,131 +124,51 @@ export const Editor: React.FC = () => {
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
-
-  // Resize state
-  const resizeStateRef = useRef<{
-    nodeId: string;
-    handle: string; // 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-    startClientX: number;
-    startClientY: number;
-    initialX: number;
-    initialY: number;
-    initialW: number;
-    initialH: number;
-  } | null>(null);
-  
-  const [isPanning, setIsPanning] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-
-  // Scrollbar Dragging State
-  const scrollbarDragRef = useRef<{
-    axis: 'x' | 'y';
-    startClientPos: number;
-    startPan: number;
-    trackLength: number;
-    worldLength: number;
-  } | null>(null);
-  const [isScrollbarDragging, setIsScrollbarDragging] = useState(false);
-
-  // Helper to center and fit the diagram into the canvas viewport
-  const centerDiagramInView = useCallback((targetNodes: CanvasNode[] = nodesRef.current, targetDrawings: FreehandDrawing[] = drawings) => {
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const viewportWidth = rect.width > 0 ? rect.width : (window.innerWidth - 300);
-    const viewportHeight = rect.height > 0 ? rect.height : (window.innerHeight - 60);
-
-    if (targetNodes.length === 0 && targetDrawings.length === 0) {
-      setPan({ x: 100, y: 100 });
-      setZoom(1);
-      return;
-    }
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    targetNodes.forEach((n) => {
-      const dim = getNodeDimensions(n);
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + dim.width);
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + dim.height);
-    });
-
-    targetDrawings.forEach((d) => {
-      const coords = d.path.match(/[-+]?\d*\.?\d+/g);
-      if (coords) {
-        for (let i = 0; i < coords.length; i += 2) {
-          const x = parseFloat(coords[i]);
-          const y = parseFloat(coords[i + 1]);
-          if (!isNaN(x) && !isNaN(y)) {
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-          }
-        }
-      }
-    });
-
-    if (minX === Infinity) {
-      minX = 0; maxX = 400; minY = 0; maxY = 300;
-    }
-
-    const contentWidth = Math.max(maxX - minX, 100);
-    const contentHeight = Math.max(maxY - minY, 100);
-    const contentCenterX = minX + contentWidth / 2;
-    const contentCenterY = minY + contentHeight / 2;
-
-    const padding = 120;
-    const scaleX = (viewportWidth - padding) / contentWidth;
-    const scaleY = (viewportHeight - padding) / contentHeight;
-    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.45), 1.15);
-
-    const targetPanX = Math.round(viewportWidth / 2 - contentCenterX * newZoom);
-    const targetPanY = Math.round(viewportHeight / 2 - contentCenterY * newZoom);
-
-    setZoom(newZoom);
-    setPan({ x: targetPanX, y: targetPanY });
+  const drawingsRef = useRef(drawings);
+  useEffect(() => {
+    drawingsRef.current = drawings;
   }, [drawings]);
 
-  // Marquee selection bounds
-  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
-  const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
+  // Resize state
+  const resizeStateRef = useRef<ResizeState | null>(null);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  const {
+    zoom,
+    pan,
+    setPan,
+    isPanning,
+    setIsPanning,
+    panStart,
+    scrollbarDragRef,
+    isScrollbarDragging,
+    scrollbarMetrics,
+    centerDiagramInView,
+    handleZoomIn,
+    handleZoomOut,
+    handleFitToScreen,
+    handleResetZoom,
+    handleScrollbarThumbMouseDown,
+    updateScrollbarDrag,
+    endScrollbarDrag,
+    handleCanvasWheel,
+  } = useCanvasTransform({
+    canvasRef,
+    nodes,
+    drawings,
+    nodesRef,
+    drawingsRef,
+  });
+
+
 
   // Freehand pencil path state
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<{ x: number; y: number }[] | null>(null);
 
-  // Handle Connecting states
-  const [connectingPort, setConnectingPort] = useState<{
-    nodeId: string;
-    port: 'top' | 'bottom' | 'left' | 'right';
-  } | null>(null);
-  const [snappedPort, setSnappedPort] = useState<{
-    nodeId: string;
-    port: 'top' | 'bottom' | 'left' | 'right';
-  } | null>(null);
-  const [tempEdgeEnd, setTempEdgeEnd] = useState({ x: 0, y: 0 });
 
-  // Editable connector routing states.
-  const edgeRouteDragRef = useRef<{
-    edgeId: string;
-    waypointIndex: number;
-    initialWaypoints: { x: number; y: number }[];
-    axis: 'x' | 'y' | 'both';
-  } | null>(null);
-  const edgeReconnectRef = useRef<{ edgeId: string; endpoint: 'source' | 'target' } | null>(null);
-  const [edgeReconnectTarget, setEdgeReconnectTarget] = useState<{
-    nodeId: string;
-    port: 'top' | 'bottom' | 'left' | 'right';
-  } | null>(null);
-  const edgeReconnectTargetRef = useRef<typeof edgeReconnectTarget>(null);
 
   // Refs for tracking mouse offsets
-  const panStart = useRef({ x: 0, y: 0 });
-  const canvasRef = useRef<HTMLDivElement>(null);
   const mouseCanvasPos = useRef({ x: 100, y: 100 });
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -763,236 +356,100 @@ export const Editor: React.FC = () => {
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   // History Undo/Redo States
-  const [historyState, setHistoryState] = useState<{
-    list: { nodes: CanvasNode[]; edges: CanvasEdge[]; drawings: FreehandDrawing[] }[];
-    index: number;
-  }>({ list: [], index: -1 });
+  const onRestoreHistoryRef = useRef<(snapshot: CanvasSnapshot) => void>(() => {});
 
-  const saveHistoryState = (
-    nextNodes: CanvasNode[],
-    nextEdges: CanvasEdge[],
-    nextDrawings: FreehandDrawing[]
-  ) => {
-    const newSnapshot = {
-      nodes: JSON.parse(JSON.stringify(nextNodes)),
-      edges: JSON.parse(JSON.stringify(nextEdges)),
-      drawings: JSON.parse(JSON.stringify(nextDrawings))
+  const {
+    saveHistoryState,
+    undo,
+    redo,
+    resetHistory,
+    canUndo,
+    canRedo,
+  } = useCanvasHistory({
+    onRestore: useCallback((snapshot: CanvasSnapshot) => {
+      onRestoreHistoryRef.current(snapshot);
+    }, []),
+  });
+
+  const {
+    selectedNodeIds,
+    setSelectedNodeIds,
+    selectedEdgeId,
+    setSelectedEdgeId,
+    selectedDrawingId,
+    setSelectedDrawingId,
+    clipboard,
+    marqueeStart,
+    setMarqueeStart,
+    marqueeEnd,
+    setMarqueeEnd,
+    copySelection,
+    cutSelection,
+    pasteClipboard,
+    duplicateSelection,
+    deleteSelectedNodes,
+    deleteSelectedEdge,
+    deleteSelectedDrawing,
+    deleteDrawing,
+    selectAllNodes,
+  } = useCanvasSelection({
+    nodes,
+    edges,
+    drawings,
+    setNodes,
+    setEdges,
+    setDrawings,
+    saveHistoryState,
+    getPastePosition: () => mouseCanvasPos.current,
+  });
+
+  const {
+    connectingPort,
+    setConnectingPort,
+    snappedPort,
+    setSnappedPort,
+    tempEdgeEnd,
+    setTempEdgeEnd,
+    edgeRouteDragRef,
+    edgeReconnectRef,
+    edgeReconnectTarget,
+    handleEdgeRouteDragStart,
+    handleEdgeReconnectStart,
+    updateEditableEdgeInteraction,
+    finishEditableEdgeInteraction,
+    resetSelectedEdgeRoute,
+    completePortConnection,
+    handlePortMouseDown,
+    handlePortMouseUp,
+  } = useEdgeInteractions({
+    nodes,
+    edges,
+    drawings,
+    nodesRef,
+    edgesRef,
+    setEdges,
+    setSelectedEdgeId,
+    setSelectedNodeIds,
+    setSelectedDrawingId,
+    saveHistoryState,
+    diagramType: diagram?.type,
+    isSnapToGrid,
+    canvasRef,
+    pan,
+    zoom,
+    activeMode,
+    selectedEdgeId,
+  });
+
+  useEffect(() => {
+    onRestoreHistoryRef.current = (snapshot: CanvasSnapshot) => {
+      setNodes(JSON.parse(JSON.stringify(snapshot.nodes)));
+      setEdges(JSON.parse(JSON.stringify(snapshot.edges)));
+      setDrawings(JSON.parse(JSON.stringify(snapshot.drawings)));
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(null);
     };
-
-    setHistoryState((prev) => {
-      // Check if identical to the current snapshot
-      const current = prev.list[prev.index];
-      if (current) {
-        if (JSON.stringify(current.nodes) === JSON.stringify(newSnapshot.nodes) &&
-            JSON.stringify(current.edges) === JSON.stringify(newSnapshot.edges) &&
-            JSON.stringify(current.drawings) === JSON.stringify(newSnapshot.drawings)) {
-          return prev;
-        }
-      }
-
-      const trimmed = prev.list.slice(0, prev.index + 1);
-      const updated = [...trimmed, newSnapshot];
-      if (updated.length > 50) {
-        updated.shift();
-      }
-      return {
-        list: updated,
-        index: updated.length - 1
-      };
-    });
-  };
-
-  const undo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (prev.index > 0) {
-        const nextIndex = prev.index - 1;
-        const snapshot = prev.list[nextIndex];
-        setNodes(JSON.parse(JSON.stringify(snapshot.nodes)));
-        setEdges(JSON.parse(JSON.stringify(snapshot.edges)));
-        setDrawings(JSON.parse(JSON.stringify(snapshot.drawings)));
-        setSelectedNodeIds([]);
-        setSelectedEdgeId(null);
-        return {
-          ...prev,
-          index: nextIndex
-        };
-      }
-      return prev;
-    });
-  }, []);
-
-  const redo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (prev.index < prev.list.length - 1) {
-        const nextIndex = prev.index + 1;
-        const snapshot = prev.list[nextIndex];
-        setNodes(JSON.parse(JSON.stringify(snapshot.nodes)));
-        setEdges(JSON.parse(JSON.stringify(snapshot.edges)));
-        setDrawings(JSON.parse(JSON.stringify(snapshot.drawings)));
-        setSelectedNodeIds([]);
-        setSelectedEdgeId(null);
-        return {
-          ...prev,
-          index: nextIndex
-        };
-      }
-      return prev;
-    });
-  }, []);
-
-  const copySelection = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
-    const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id));
-    const selectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target));
-    setClipboard({
-      nodes: JSON.parse(JSON.stringify(selectedNodes)),
-      edges: JSON.parse(JSON.stringify(selectedEdges))
-    });
-  }, [nodes, edges, selectedNodeIds]);
-
-  const cutSelection = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
-    const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id));
-    const selectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target));
-    setClipboard({
-      nodes: JSON.parse(JSON.stringify(selectedNodes)),
-      edges: JSON.parse(JSON.stringify(selectedEdges))
-    });
-    // Delete them
-    const nextNodes = nodes.filter(n => !selectedNodeIds.includes(n.id));
-    const nextEdges = edges.filter(e => !selectedNodeIds.includes(e.source) && !selectedNodeIds.includes(e.target));
-    setNodes(nextNodes);
-    setEdges(nextEdges);
-    setSelectedNodeIds([]);
-    saveHistoryState(nextNodes, nextEdges, drawings);
-  }, [nodes, edges, drawings, selectedNodeIds, saveHistoryState]);
-
-  const pasteClipboard = useCallback((targetCoords?: { x: number; y: number }) => {
-    if (!clipboard || clipboard.nodes.length === 0) return;
-
-    // Calculate bounding box center of copied nodes
-    const minX = Math.min(...clipboard.nodes.map(n => n.x));
-    const minY = Math.min(...clipboard.nodes.map(n => n.y));
-    
-    // Target position is either targetCoords, the active mouse pointer, or centered
-    const pasteX = targetCoords ? targetCoords.x : mouseCanvasPos.current.x;
-    const pasteY = targetCoords ? targetCoords.y : mouseCanvasPos.current.y;
-    
-    // Map of old IDs to new IDs
-    const idMap: Record<string, string> = {};
-    const newNodes: CanvasNode[] = clipboard.nodes.map((oldNode) => {
-      const newId = `n-${Math.random().toString(36).substr(2, 9)}`;
-      idMap[oldNode.id] = newId;
-
-      const gridSnap = 20;
-      const relativeX = oldNode.x - minX;
-      const relativeY = oldNode.y - minY;
-      const targetX = Math.round((pasteX + relativeX) / gridSnap) * gridSnap;
-      const targetY = Math.round((pasteY + relativeY) / gridSnap) * gridSnap;
-
-      return {
-        ...oldNode,
-        id: newId,
-        x: targetX,
-        y: targetY
-      };
-    });
-
-    const newEdges: CanvasEdge[] = clipboard.edges.map((oldEdge) => {
-      const newSource = idMap[oldEdge.source];
-      const newTarget = idMap[oldEdge.target];
-      if (newSource && newTarget) {
-        return {
-          ...oldEdge,
-          id: `e-${Math.random().toString(36).substr(2, 9)}`,
-          source: newSource,
-          target: newTarget
-        };
-      }
-      return null;
-    }).filter(Boolean) as CanvasEdge[];
-
-    const updatedNodes = [...nodes, ...newNodes];
-    const updatedEdges = [...edges, ...newEdges];
-    setNodes(updatedNodes);
-    setEdges(updatedEdges);
-    setSelectedNodeIds(newNodes.map(n => n.id));
-    setSelectedEdgeId(null);
-    saveHistoryState(updatedNodes, updatedEdges, drawings);
-  }, [clipboard, nodes, edges, drawings, saveHistoryState]);
-
-  const duplicateSelection = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
-    const selectedNodes = nodes.filter(n => selectedNodeIds.includes(n.id));
-    const selectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target));
-
-    const idMap: Record<string, string> = {};
-    const newNodes: CanvasNode[] = selectedNodes.map((oldNode) => {
-      const newId = `n-${Math.random().toString(36).substr(2, 9)}`;
-      idMap[oldNode.id] = newId;
-      return {
-        ...oldNode,
-        id: newId,
-        x: oldNode.x + 20, // Offset by 20px grid snap
-        y: oldNode.y + 20
-      };
-    });
-
-    const newEdges: CanvasEdge[] = selectedEdges.map((oldEdge) => {
-      const newSource = idMap[oldEdge.source];
-      const newTarget = idMap[oldEdge.target];
-      if (newSource && newTarget) {
-        return {
-          ...oldEdge,
-          id: `e-${Math.random().toString(36).substr(2, 9)}`,
-          source: newSource,
-          target: newTarget
-        };
-      }
-      return null;
-    }).filter(Boolean) as CanvasEdge[];
-
-    const updatedNodes = [...nodes, ...newNodes];
-    const updatedEdges = [...edges, ...newEdges];
-    setNodes(updatedNodes);
-    setEdges(updatedEdges);
-    setSelectedNodeIds(newNodes.map(n => n.id));
-    setSelectedEdgeId(null);
-    saveHistoryState(updatedNodes, updatedEdges, drawings);
-  }, [nodes, edges, drawings, selectedNodeIds, saveHistoryState]);
-
-  const deleteSelectedNodes = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
-    const nextNodes = nodes.filter(n => !selectedNodeIds.includes(n.id));
-    const nextEdges = edges.filter(e => !selectedNodeIds.includes(e.source) && !selectedNodeIds.includes(e.target));
-    setNodes(nextNodes);
-    setEdges(nextEdges);
-    setSelectedNodeIds([]);
-    saveHistoryState(nextNodes, nextEdges, drawings);
-  }, [nodes, edges, drawings, selectedNodeIds, saveHistoryState]);
-
-  const deleteSelectedEdge = useCallback(() => {
-    if (!selectedEdgeId) return;
-    const nextEdges = edges.filter(e => e.id !== selectedEdgeId);
-    setEdges(nextEdges);
-    setSelectedEdgeId(null);
-    saveHistoryState(nodes, nextEdges, drawings);
-  }, [nodes, edges, drawings, selectedEdgeId, saveHistoryState]);
-
-  const deleteSelectedDrawing = useCallback(() => {
-    if (!selectedDrawingId) return;
-    const nextDrawings = drawings.filter(d => d.id !== selectedDrawingId);
-    setDrawings(nextDrawings);
-    setSelectedDrawingId(null);
-    saveHistoryState(nodes, edges, nextDrawings);
-  }, [drawings, selectedDrawingId, nodes, edges, saveHistoryState]);
-
-  const deleteDrawing = useCallback((drawingId: string) => {
-    const nextDrawings = drawings.filter(d => d.id !== drawingId);
-    setDrawings(nextDrawings);
-    if (selectedDrawingId === drawingId) setSelectedDrawingId(null);
-    saveHistoryState(nodes, edges, nextDrawings);
-  }, [drawings, selectedDrawingId, nodes, edges, saveHistoryState]);
+  }, [setSelectedNodeIds, setSelectedEdgeId]);
 
   const updateSelectedDrawingColor = (color: string) => {
     if (!selectedDrawingId) return;
@@ -1008,10 +465,7 @@ export const Editor: React.FC = () => {
     saveHistoryState(nodes, edges, next);
   };
 
-  const selectAllNodes = useCallback(() => {
-    setSelectedNodeIds(nodes.map(n => n.id));
-    setSelectedEdgeId(null);
-  }, [nodes]);
+
 
   // Serialize saves so a slower earlier request cannot overwrite newer edits.
   const flushSave = useCallback(async () => {
@@ -1047,6 +501,16 @@ export const Editor: React.FC = () => {
     setSaveStatus('saving');
     void flushSave();
   };
+
+  const centerDiagramInViewRef = useRef(centerDiagramInView);
+  useEffect(() => {
+    centerDiagramInViewRef.current = centerDiagramInView;
+  }, [centerDiagramInView]);
+
+  const resetHistoryRef = useRef(resetHistory);
+  useEffect(() => {
+    resetHistoryRef.current = resetHistory;
+  }, [resetHistory]);
 
   // Load Diagram
   useEffect(() => {
@@ -1085,18 +549,11 @@ export const Editor: React.FC = () => {
             setDrawings(initialDrawings);
 
             // Setup initial undo stack
-            setHistoryState({
-              list: [{
-                nodes: JSON.parse(JSON.stringify(initialNodes)),
-                edges: JSON.parse(JSON.stringify(initialEdges)),
-                drawings: JSON.parse(JSON.stringify(initialDrawings))
-              }],
-              index: 0
-            });
+            resetHistoryRef.current(initialNodes, initialEdges, initialDrawings);
 
             // Focus viewport directly on the diagram shapes
             setTimeout(() => {
-              centerDiagramInView(initialNodes, initialDrawings);
+              centerDiagramInViewRef.current(initialNodes, initialDrawings);
             }, 60);
           } catch (e) {
             console.error("Failed to parse visual content:", e);
@@ -1235,330 +692,9 @@ export const Editor: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [undo, redo, copySelection, cutSelection, pasteClipboard, duplicateSelection, selectAllNodes, selectedNodeIds, selectedEdgeId, selectedDrawingId, deleteSelectedNodes, deleteSelectedEdge, deleteSelectedDrawing]);
+  }, [undo, redo, copySelection, cutSelection, pasteClipboard, duplicateSelection, selectAllNodes, selectedNodeIds, selectedEdgeId, selectedDrawingId, deleteSelectedNodes, deleteSelectedEdge, deleteSelectedDrawing, setSelectedNodeIds, setSelectedEdgeId, setSelectedDrawingId, setMarqueeStart, setMarqueeEnd, setConnectingPort, setSnappedPort]);
 
-  // Helper to find closest connection port on a given node relative to a canvas coordinate
-  const getClosestPortOnNode = (
-    node: CanvasNode, 
-    point: { x: number; y: number }
-  ): { port: 'top' | 'bottom' | 'left' | 'right'; coords: { x: number; y: number }; dist: number } => {
-    const ports: ('top' | 'bottom' | 'left' | 'right')[] = ['top', 'bottom', 'left', 'right'];
-    let closestPort: 'top' | 'bottom' | 'left' | 'right' = 'left';
-    let closestCoords = getPortCoords(node, 'left');
-    let minDist = Infinity;
-
-    for (const p of ports) {
-      const coords = getPortCoords(node, p);
-      const dist = Math.hypot(coords.x - point.x, coords.y - point.y);
-      if (dist < minDist) {
-        minDist = dist;
-        closestPort = p;
-        closestCoords = coords;
-      }
-    }
-
-    return { port: closestPort, coords: closestCoords, dist: minDist };
-  };
-
-  // All diagram surfaces use the same port geometry and obstacle-aware routing.
-  const getEdgePath = (edge: CanvasEdge) => calculateEdgePath(edge, nodes);
-
-  const getCanvasPointFromClient = (clientX: number, clientY: number) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    const raw = { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom };
-    if (!isSnapToGrid) return raw;
-    return { x: Math.round(raw.x / 20) * 20, y: Math.round(raw.y / 20) * 20 };
-  };
-
-  const findNearestPort = (point: { x: number; y: number }) => {
-    let nearest: { nodeId: string; port: 'top' | 'bottom' | 'left' | 'right'; distance: number } | null = null;
-    for (const node of nodesRef.current) {
-      const candidate = getClosestPortOnNode(node, point);
-      if (candidate.dist <= 36 && (!nearest || candidate.dist < nearest.distance)) {
-        nearest = { nodeId: node.id, port: candidate.port, distance: candidate.dist };
-      }
-    }
-    return nearest;
-  };
-
-  const handleEdgeRouteDragStart = (
-    e: React.MouseEvent,
-    edge: CanvasEdge,
-    pathPoints: { x: number; y: number }[],
-    segmentIndex?: number,
-    waypointIndex?: number
-  ) => {
-    if (activeMode !== 'select') return;
-    e.preventDefault();
-    e.stopPropagation();
-    const pointer = getCanvasPointFromClient(e.clientX, e.clientY);
-    if (!pointer) return;
-
-    const initialWaypoints = edge.routeMode === 'manual' && edge.waypoints?.length
-      ? edge.waypoints.map(point => ({ ...point }))
-      : pathPoints.slice(1, -1).map(point => ({ ...point }));
-
-    let nextIndex = waypointIndex ?? Math.min(Math.max((segmentIndex ?? 1) - 1, 0), Math.max(initialWaypoints.length - 1, 0));
-    if (initialWaypoints.length === 0) {
-      initialWaypoints.push(pointer);
-      nextIndex = 0;
-    }
-
-    const segmentStart = segmentIndex === undefined ? null : pathPoints[segmentIndex];
-    const segmentEnd = segmentIndex === undefined ? null : pathPoints[segmentIndex + 1];
-    const axis = segmentStart && segmentEnd
-      ? (segmentStart.y === segmentEnd.y ? 'y' : 'x')
-      : 'both';
-
-    edgeRouteDragRef.current = { edgeId: edge.id, waypointIndex: nextIndex, initialWaypoints, axis };
-    const nextEdges = edgesRef.current.map(item => item.id === edge.id
-      ? { ...item, routeMode: 'manual' as const, waypoints: initialWaypoints }
-      : item
-    );
-    edgesRef.current = nextEdges;
-    setEdges(nextEdges);
-    setSelectedEdgeId(edge.id);
-    setSelectedNodeIds([]);
-    setSelectedDrawingId(null);
-  };
-
-  const handleEdgeReconnectStart = (e: React.MouseEvent, edgeId: string, endpoint: 'source' | 'target') => {
-    if (activeMode !== 'select') return;
-    e.preventDefault();
-    e.stopPropagation();
-    edgeReconnectRef.current = { edgeId, endpoint };
-    edgeReconnectTargetRef.current = null;
-    setEdgeReconnectTarget(null);
-  };
-
-  const updateEditableEdgeInteraction = (clientX: number, clientY: number) => {
-    const point = getCanvasPointFromClient(clientX, clientY);
-    if (!point) return false;
-
-    if (edgeRouteDragRef.current) {
-      const { edgeId, waypointIndex, initialWaypoints, axis } = edgeRouteDragRef.current;
-      const waypoints = initialWaypoints.map((waypoint, index) => index === waypointIndex
-        ? {
-            x: axis === 'y' ? waypoint.x : point.x,
-            y: axis === 'x' ? waypoint.y : point.y
-          }
-        : waypoint
-      );
-      const nextEdges = edgesRef.current.map(edge => edge.id === edgeId
-        ? { ...edge, routeMode: 'manual' as const, waypoints }
-        : edge
-      );
-      edgesRef.current = nextEdges;
-      setEdges(nextEdges);
-      return true;
-    }
-
-    if (edgeReconnectRef.current) {
-      const nearest = findNearestPort(point);
-      edgeReconnectTargetRef.current = nearest ? { nodeId: nearest.nodeId, port: nearest.port } : null;
-      setEdgeReconnectTarget(nearest ? { nodeId: nearest.nodeId, port: nearest.port } : null);
-      return true;
-    }
-
-    return false;
-  };
-
-  const finishEditableEdgeInteraction = () => {
-    if (edgeRouteDragRef.current) {
-      edgeRouteDragRef.current = null;
-      saveHistoryState(nodesRef.current, edgesRef.current, drawings);
-    }
-
-    if (edgeReconnectRef.current) {
-      const { edgeId, endpoint } = edgeReconnectRef.current;
-      const reconnectTarget = edgeReconnectTargetRef.current;
-      if (reconnectTarget) {
-        const nextEdges = edgesRef.current.map(edge => edge.id === edgeId
-          ? {
-              ...edge,
-              [endpoint]: reconnectTarget.nodeId,
-              [endpoint === 'source' ? 'sourceHandle' : 'targetHandle']: reconnectTarget.port,
-              routeMode: 'auto' as const,
-              waypoints: undefined
-            }
-          : edge
-        );
-        edgesRef.current = nextEdges;
-        setEdges(nextEdges);
-        saveHistoryState(nodesRef.current, nextEdges, drawings);
-      }
-      edgeReconnectRef.current = null;
-      edgeReconnectTargetRef.current = null;
-      setEdgeReconnectTarget(null);
-    }
-  };
-
-  const resetSelectedEdgeRoute = () => {
-    if (!selectedEdgeId) return;
-    const nextEdges = edges.map(edge => edge.id === selectedEdgeId
-      ? { ...edge, routeMode: 'auto' as const, waypoints: undefined }
-      : edge
-    );
-    edgesRef.current = nextEdges;
-    setEdges(nextEdges);
-    saveHistoryState(nodes, nextEdges, drawings);
-  };
-
-  // Viewport / drag actions
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.15, 3));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.15, 0.25));
-  const handleFitToScreen = () => {
-    centerDiagramInView();
-  };
-  const handleResetZoom = () => {
-    centerDiagramInView();
-  };
-
-  // Content bounding box for scrollbar extent calculations
-  const contentBounds = useMemo(() => {
-    if (nodes.length === 0 && drawings.length === 0) {
-      return { minX: 0, maxX: 800, minY: 0, maxY: 600, width: 800, height: 600 };
-    }
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    nodes.forEach((n) => {
-      const dim = getNodeDimensions(n);
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + dim.width);
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + dim.height);
-    });
-
-    drawings.forEach((d) => {
-      const coords = d.path.match(/[-+]?\d*\.?\d+/g);
-      if (coords) {
-        for (let i = 0; i < coords.length; i += 2) {
-          const x = parseFloat(coords[i]);
-          const y = parseFloat(coords[i + 1]);
-          if (!isNaN(x) && !isNaN(y)) {
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-          }
-        }
-      }
-    });
-
-    if (minX === Infinity) {
-      minX = 0; maxX = 800; minY = 0; maxY = 600;
-    }
-
-    return {
-      minX,
-      maxX,
-      minY,
-      maxY,
-      width: Math.max(maxX - minX, 100),
-      height: Math.max(maxY - minY, 100)
-    };
-  }, [nodes, drawings]);
-
-  // Compute real-time scrollbar dimensions and positions
-  const scrollbarMetrics = useMemo(() => {
-    const defaultW = 800;
-    const defaultH = 600;
-    const rect = canvasRef.current ? canvasRef.current.getBoundingClientRect() : { width: defaultW, height: defaultH };
-    const width = rect.width > 0 ? rect.width : defaultW;
-    const height = rect.height > 0 ? rect.height : defaultH;
-
-    // Horizontal scrollbar metrics
-    const trackW = Math.max(width - 24, 100);
-    const visibleMinX = -pan.x / zoom;
-    const visibleMaxX = (width - pan.x) / zoom;
-    const worldMinX = Math.min(contentBounds.minX - 600, visibleMinX - 200);
-    const worldMaxX = Math.max(contentBounds.maxX + 600, visibleMaxX + 200);
-    const worldW = Math.max(worldMaxX - worldMinX, 100);
-    const thumbRatioX = Math.min(Math.max((width / zoom) / worldW, 0.05), 0.95);
-    const thumbW = Math.max(thumbRatioX * trackW, 36);
-    const thumbLeft = Math.max(0, Math.min(((visibleMinX - worldMinX) / worldW) * trackW, trackW - thumbW));
-
-    // Vertical scrollbar metrics
-    const trackH = Math.max(height - 24, 100);
-    const visibleMinY = -pan.y / zoom;
-    const visibleMaxY = (height - pan.y) / zoom;
-    const worldMinY = Math.min(contentBounds.minY - 500, visibleMinY - 200);
-    const worldMaxY = Math.max(contentBounds.maxY + 500, visibleMaxY + 200);
-    const worldH = Math.max(worldMaxY - worldMinY, 100);
-    const thumbRatioY = Math.min(Math.max((height / zoom) / worldH, 0.05), 0.95);
-    const thumbH = Math.max(thumbRatioY * trackH, 36);
-    const thumbTop = Math.max(0, Math.min(((visibleMinY - worldMinY) / worldH) * trackH, trackH - thumbH));
-
-    return {
-      horiz: { trackWidth: trackW, thumbWidth: thumbW, thumbLeft: Math.round(thumbLeft), worldMinX, worldW },
-      vert: { trackHeight: trackH, thumbHeight: thumbH, thumbTop: Math.round(thumbTop), worldMinY, worldH }
-    };
-  }, [pan, zoom, contentBounds]);
-
-  const handleScrollbarThumbMouseDown = (e: React.MouseEvent, axis: 'x' | 'y') => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const trackLength = axis === 'x' ? Math.max(rect.width - 24, 100) : Math.max(rect.height - 24, 100);
-
-    const visibleMin = axis === 'x' ? -pan.x / zoom : -pan.y / zoom;
-    const visibleSpan = axis === 'x' ? rect.width / zoom : rect.height / zoom;
-    const contentMin = axis === 'x' ? contentBounds.minX : contentBounds.minY;
-    const contentMax = axis === 'x' ? contentBounds.maxX : contentBounds.maxY;
-    const worldMin = Math.min(contentMin - 600, visibleMin - 200);
-    const worldMax = Math.max(contentMax + 600, visibleMin + visibleSpan + 200);
-    const worldLength = Math.max(worldMax - worldMin, 100);
-
-    scrollbarDragRef.current = {
-      axis,
-      startClientPos: axis === 'x' ? e.clientX : e.clientY,
-      startPan: axis === 'x' ? pan.x : pan.y,
-      trackLength,
-      worldLength
-    };
-    setIsScrollbarDragging(true);
-  };
-
-  // Wheel Zoom & 2D Pan Scroll
-  const handleCanvasWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom at mouse location
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.25), 3);
-
-      if (canvasRef.current) {
-        const rect = canvasRef.current.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        const newPanX = mouseX - (mouseX - pan.x) * (newZoom / zoom);
-        const newPanY = mouseY - (mouseY - pan.y) * (newZoom / zoom);
-
-        setZoom(newZoom);
-        setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
-      } else {
-        setZoom(newZoom);
-      }
-    } else {
-      // 2D Scroll
-      let deltaX = e.deltaX;
-      let deltaY = e.deltaY;
-      if (e.shiftKey && deltaX === 0) {
-        deltaX = deltaY;
-        deltaY = 0;
-      }
-      setPan(prev => ({
-        x: Math.round(prev.x - deltaX),
-        y: Math.round(prev.y - deltaY)
-      }));
-    }
-  };
+  const getEdgePath = useCallback((edge: CanvasEdge) => calculateEdgePath(edge, nodes), [nodes]);
 
   // Add Node from Sidebar Palette
   const addNode = (type: CanvasNode['type']) => {
@@ -2062,47 +1198,37 @@ export const Editor: React.FC = () => {
     handleMouseUpRef.current = handleMouseUp;
   });
 
+  const handleWindowMouseMoveRef = useRef<(e: MouseEvent) => void>(() => {});
+  handleWindowMouseMoveRef.current = (e: MouseEvent) => {
+    if (updateEditableEdgeInteraction(e.clientX, e.clientY)) return;
+
+    if (updateScrollbarDrag(e.clientX, e.clientY)) return;
+
+    if (resizeStateRef.current) {
+      handleResizeMouseMove(e.clientX, e.clientY);
+    } else if (nodeDragStateRef.current?.isDown && activeMode === 'select') {
+      handleNodeDragMouseMove(e.clientX, e.clientY);
+    }
+  };
+
+  const handleWindowMouseUpRef = useRef<() => void>(() => {});
+  handleWindowMouseUpRef.current = () => {
+    if (edgeRouteDragRef.current || edgeReconnectRef.current) {
+      handleMouseUpRef.current();
+      return;
+    }
+    endScrollbarDrag();
+    if (resizeStateRef.current) {
+      handleMouseUpRef.current();
+    } else if (nodeDragStateRef.current?.isDown) {
+      handleMouseUpRef.current();
+    }
+  };
+
   // Global window listeners to ensure drag move & mouseup are tracked even if pointer leaves canvas
   useEffect(() => {
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      if (updateEditableEdgeInteraction(e.clientX, e.clientY)) return;
-
-      if (scrollbarDragRef.current) {
-        const s = scrollbarDragRef.current;
-        const currentClientPos = s.axis === 'x' ? e.clientX : e.clientY;
-        const deltaClient = currentClientPos - s.startClientPos;
-        const deltaWorld = deltaClient * (s.worldLength / s.trackLength);
-        const newPanValue = Math.round(s.startPan - deltaWorld * zoom);
-        if (s.axis === 'x') {
-          setPan(prev => ({ ...prev, x: newPanValue }));
-        } else {
-          setPan(prev => ({ ...prev, y: newPanValue }));
-        }
-        return;
-      }
-
-      if (resizeStateRef.current) {
-        handleResizeMouseMove(e.clientX, e.clientY);
-      } else if (nodeDragStateRef.current?.isDown && activeMode === 'select') {
-        handleNodeDragMouseMove(e.clientX, e.clientY);
-      }
-    };
-
-    const handleWindowMouseUp = () => {
-      if (edgeRouteDragRef.current || edgeReconnectRef.current) {
-        handleMouseUpRef.current();
-        return;
-      }
-      if (scrollbarDragRef.current) {
-        scrollbarDragRef.current = null;
-        setIsScrollbarDragging(false);
-      }
-      if (resizeStateRef.current) {
-        handleMouseUpRef.current();
-      } else if (nodeDragStateRef.current?.isDown) {
-        handleMouseUpRef.current();
-      }
-    };
+    const handleWindowMouseMove = (e: MouseEvent) => handleWindowMouseMoveRef.current(e);
+    const handleWindowMouseUp = () => handleWindowMouseUpRef.current();
 
     window.addEventListener('mousemove', handleWindowMouseMove);
     window.addEventListener('mouseup', handleWindowMouseUp);
@@ -2110,37 +1236,9 @@ export const Editor: React.FC = () => {
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [activeMode, zoom, pan]);
+  }, []);
 
-  // Complete an edge connection cleanly and reliably
-  const completePortConnection = (targetNodeId: string, targetPort: 'top' | 'bottom' | 'left' | 'right') => {
-    if (!connectingPort || connectingPort.nodeId === targetNodeId) {
-      setConnectingPort(null);
-      setSnappedPort(null);
-      return;
-    }
 
-    const isErd = diagram?.type === 'erd';
-    const newEdge: CanvasEdge = {
-      id: `e-${Math.random().toString(36).substr(2, 9)}`,
-      source: connectingPort.nodeId,
-      target: targetNodeId,
-      sourceHandle: connectingPort.port,
-      targetHandle: targetPort,
-      style: 'solid',
-      arrow: isErd ? undefined : 'end',
-      sourceMarker: isErd ? 'one' : undefined,
-      targetMarker: isErd ? 'many' : 'arrow'
-    };
-
-    const nextEdges = [...edges, newEdge];
-    setEdges(nextEdges);
-    setSelectedEdgeId(newEdge.id);
-    setSelectedNodeIds([]);
-    setConnectingPort(null);
-    setSnappedPort(null);
-    saveHistoryState(nodes, nextEdges, drawings);
-  };
 
   // Dropping a connection anywhere over a target shape's body
   const handleNodeMouseUp = (e: React.MouseEvent, targetNode: CanvasNode) => {
@@ -2156,43 +1254,6 @@ export const Editor: React.FC = () => {
 
       completePortConnection(targetNode.id, targetPort);
     }
-  };
-
-  // Global window mouseup listener to guarantee connection cleanup
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (connectingPort) {
-        if (snappedPort) {
-          completePortConnection(snappedPort.nodeId, snappedPort.port);
-        } else {
-          setConnectingPort(null);
-          setSnappedPort(null);
-        }
-      }
-    };
-
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => {
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-    };
-  }, [connectingPort, snappedPort, edges, nodes, drawings]);
-
-  // Connect Handles Anchors
-  const handlePortMouseDown = (e: React.MouseEvent, nodeId: string, port: 'top' | 'bottom' | 'left' | 'right') => {
-    e.stopPropagation();
-    e.preventDefault();
-    const sourceNode = nodes.find(n => n.id === nodeId);
-    if (!sourceNode) return;
-
-    const start = getPortCoords(sourceNode, port);
-    setConnectingPort({ nodeId, port });
-    setSnappedPort(null);
-    setTempEdgeEnd(start);
-  };
-
-  const handlePortMouseUp = (e: React.MouseEvent, targetNodeId: string, targetPort: 'top' | 'bottom' | 'left' | 'right') => {
-    e.stopPropagation();
-    completePortConnection(targetNodeId, targetPort);
   };
 
   // Context Menu handlers
@@ -2226,7 +1287,7 @@ export const Editor: React.FC = () => {
       canvasY: canvasMouseY,
       targetNodeId
     });
-  }, [pan, zoom, selectedNodeIds]);
+  }, [pan, zoom, selectedNodeIds, setSelectedNodeIds, setSelectedEdgeId]);
 
   // Clickaway listener to close context menu
   useEffect(() => {
@@ -2429,6 +1490,9 @@ export const Editor: React.FC = () => {
   };
 
   // 1-Click Auto Align / Tidy Up utility
+  const isSingleNodeSelected = selectedNodeIds.length === 1;
+  const activeNode = isSingleNodeSelected ? nodes.find(n => n.id === selectedNodeIds[0]) : null;
+
   const autoAlignNodes = () => {
     if (nodes.length <= 1) return;
 
@@ -2475,11 +1539,7 @@ export const Editor: React.FC = () => {
 
   if (!diagram) return null;
 
-  const hasSelection = selectedNodeIds.length > 0;
-  const isSingleNodeSelected = selectedNodeIds.length === 1;
-  const activeNode = isSingleNodeSelected ? nodes.find(n => n.id === selectedNodeIds[0]) : null;
-  const activeEdge = edges.find(e => e.id === selectedEdgeId);
-  const selectedDrawing = selectedDrawingId ? drawings.find(d => d.id === selectedDrawingId) : null;
+
 
   return (
     <div className="h-screen bg-paper flex flex-col text-ink font-sans overflow-hidden select-none" onMouseUp={handleMouseUp}>
@@ -3281,265 +2341,41 @@ export const Editor: React.FC = () => {
             </div>
           )}
 
-          {/* Floating Pencil Subtool Dock when Draw Mode is active */}
-          {activeMode === 'draw' && (
-            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-paper-raised border-2 border-ink shadow-hard-ink px-3 py-1.5 text-[12px] font-mono select-none">
-              {/* Tool Mode: Pen, Highlighter, Eraser */}
-              <div className="flex border border-ink bg-paper">
-                <button
-                  type="button"
-                  onClick={() => setPencilTool('pen')}
-                  className={`px-2.5 py-1 flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    pencilTool === 'pen' ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
-                  }`}
-                  title="Pen (Opaque Stroke)"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">Pen</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPencilTool('highlighter')}
-                  className={`px-2.5 py-1 border-l border-ink flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    pencilTool === 'highlighter' ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
-                  }`}
-                  title="Highlighter (Translucent Stroke)"
-                >
-                  <Highlighter className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">Highlighter</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPencilTool('eraser')}
-                  className={`px-2.5 py-1 border-l border-ink flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    pencilTool === 'eraser' ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
-                  }`}
-                  title="Eraser (Click or drag over strokes to delete)"
-                >
-                  <Eraser className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">Eraser</span>
-                </button>
-              </div>
+          <CanvasToolbar
+            activeMode={activeMode}
+            setActiveMode={setActiveMode}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            undo={undo}
+            redo={redo}
+            onClearSelection={() => {
+              setSelectedNodeIds([]);
+              setSelectedEdgeId(null);
+            }}
+            zoom={zoom}
+            canvasGridStyle={canvasGridStyle}
+            isSnapToGrid={isSnapToGrid}
+            onToggleGridStyle={handleToggleGridStyle}
+            onToggleSnap={handleToggleSnap}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onFitToScreen={handleFitToScreen}
+            onResetZoom={handleResetZoom}
+            pencilTool={pencilTool}
+            setPencilTool={setPencilTool}
+            pencilColor={pencilColor}
+            setPencilColor={setPencilColor}
+            pencilWidth={pencilWidth}
+            setPencilWidth={setPencilWidth}
+          />
 
-              {/* Color Presets & Custom Picker */}
-              {pencilTool !== 'eraser' && (
-                <>
-                  <div className="w-[1.5px] h-5 bg-line"></div>
-                  <div className="flex items-center gap-1">
-                    {PENCIL_COLOR_PRESETS.map((preset) => (
-                      <button
-                        key={preset.value}
-                        type="button"
-                        onClick={() => setPencilColor(preset.value)}
-                        className={`w-5 h-5 rounded-full border border-ink transition-transform cursor-pointer ${
-                          pencilColor === preset.value ? 'scale-125 ring-2 ring-blueprint' : 'hover:scale-110'
-                        }`}
-                        style={{ backgroundColor: preset.value }}
-                        title={preset.label}
-                      />
-                    ))}
-                    <label className="w-5 h-5 rounded-full border border-dashed border-ink flex items-center justify-center cursor-pointer relative overflow-hidden ml-0.5" title="Custom color">
-                      <input
-                        type="color"
-                        value={pencilColor}
-                        onChange={(e) => setPencilColor(e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-2.5 h-2.5 text-ink-soft" />
-                    </label>
-                  </div>
-                </>
-              )}
-
-              {/* Stroke Width Presets */}
-              {pencilTool !== 'eraser' && (
-                <>
-                  <div className="w-[1.5px] h-5 bg-line"></div>
-                  <div className="flex items-center gap-1">
-                    {PENCIL_WIDTH_PRESETS.map((preset) => (
-                      <button
-                        key={preset.value}
-                        type="button"
-                        onClick={() => setPencilWidth(preset.value)}
-                        className={`px-1.5 py-0.5 border text-[10px] cursor-pointer transition-colors ${
-                          pencilWidth === preset.value
-                            ? 'border-ink bg-ink text-paper font-bold'
-                            : 'border-line text-ink-soft hover:border-ink hover:text-ink'
-                        }`}
-                        title={`${preset.label} (${preset.value}px)`}
-                      >
-                        {preset.value}px
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* Clear All Drawings button */}
-              {drawings.length > 0 && (
-                <>
-                  <div className="w-[1.5px] h-5 bg-line"></div>
-                  <button
-                    type="button"
-                    onClick={clearAllDrawings}
-                    className="p-1 border border-line hover:border-signal text-ink-soft hover:text-signal transition-colors cursor-pointer flex items-center gap-1 text-[10px]"
-                    title="Clear all drawings"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Clear</span>
-                  </button>
-                </>
-              )}
-
-              {/* Done button to exit drawing mode */}
-              <div className="w-[1.5px] h-5 bg-line"></div>
-              <button
-                type="button"
-                onClick={() => setActiveMode('select')}
-                className="px-2 py-1 bg-ink text-paper text-[10.5px] font-bold border border-ink hover:bg-blueprint transition-colors flex items-center gap-1 cursor-pointer"
-                title="Done drawing (Shortcut: V or Esc)"
-              >
-                <Check className="w-3 h-3" />
-                <span>Done</span>
-              </button>
-            </div>
-          )}
-
-          {/* S09 Horizontal Floating Mode Selector Toolbar (V, M, H, etc.) at bottom middle */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex flex-row items-center bg-paper-raised border-[1.5px] border-ink rounded-full shadow-hard-ink select-none h-11 px-4 gap-3">
-            {/* Select mode V */}
-            <button
-              onClick={() => setActiveMode('select')}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                activeMode === 'select' 
-                  ? 'bg-ink text-paper border-ink' 
-                  : 'text-ink hover:bg-paper hover:border-line'
-              }`}
-              title="Select / Move / Connect (Shortcut: V)"
-            >
-              <MousePointer className="w-4 h-4" />
-            </button>
-
-            {/* Mark mode M */}
-            <button
-              onClick={() => {
-                setActiveMode('mark');
-                setSelectedNodeIds([]);
-                setSelectedEdgeId(null);
-              }}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                activeMode === 'mark' 
-                  ? 'bg-ink text-paper border-ink' 
-                  : 'text-ink hover:bg-paper hover:border-line'
-              }`}
-              title="Marquee Selection Rectangle (Shortcut: M)"
-            >
-              <div className="w-3.5 h-3.5 border-dashed border border-current rounded-none"></div>
-            </button>
-
-            {/* Pencil mode P */}
-            <button
-              onClick={() => {
-                setActiveMode('draw');
-                setSelectedNodeIds([]);
-                setSelectedEdgeId(null);
-              }}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                activeMode === 'draw' 
-                  ? 'bg-ink text-paper border-ink' 
-                  : 'text-ink hover:bg-paper hover:border-line'
-              }`}
-              title="Pencil Drawing Sketches (Shortcut: P)"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Pan mode H */}
-            <button
-              onClick={() => setActiveMode('pan')}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                activeMode === 'pan' 
-                  ? 'bg-ink text-paper border-ink' 
-                  : 'text-ink hover:bg-paper hover:border-line'
-              }`}
-              title="Hand Pan Canvas (Shortcut: H)"
-            >
-              <Hand className="w-4 h-4" />
-            </button>
-
-            {/* Divider */}
-            <div className="w-[1.5px] h-6 bg-line mx-1"></div>
-
-            {/* Undo */}
-            <button
-              onClick={undo}
-              disabled={historyState.index <= 0}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                historyState.index > 0 
-                  ? 'text-ink hover:bg-paper hover:border-line cursor-pointer' 
-                  : 'text-ink-soft opacity-30 cursor-not-allowed'
-              }`}
-              title="Undo (Ctrl+Z)"
-            >
-              <Undo className="w-4 h-4" />
-            </button>
-
-            {/* Redo */}
-            <button
-              onClick={redo}
-              disabled={historyState.index >= historyState.list.length - 1}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors border border-transparent ${
-                historyState.index < historyState.list.length - 1 
-                  ? 'text-ink hover:bg-paper hover:border-line cursor-pointer' 
-                  : 'text-ink-soft opacity-30 cursor-not-allowed'
-              }`}
-              title="Redo (Ctrl+Y)"
-            >
-              <Redo className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Canvas Floating Zoom & Grid controls */}
-          <div className="absolute top-4 right-4 z-10 flex border border-line bg-paper-raised shadow-hard-ink font-mono text-[11px] select-none">
-            {/* Grid Pattern Selector */}
-            <button 
-              onClick={handleToggleGridStyle} 
-              className="px-2 py-1.5 border-r border-line hover:bg-paper flex items-center gap-1 cursor-pointer text-[10.5px] text-ink-soft hover:text-ink" 
-              title={`Grid Pattern: ${canvasGridStyle} (Click to switch)`}
-            >
-              <Grid className="w-3.5 h-3.5 text-blueprint" />
-              <span className="hidden sm:inline uppercase text-[9.5px]">{canvasGridStyle}</span>
-            </button>
-
-            {/* Magnetic Snap toggle */}
-            <button 
-              onClick={handleToggleSnap} 
-              className={`px-2 py-1.5 border-r border-line hover:bg-paper flex items-center gap-1 cursor-pointer text-[10.5px] ${
-                isSnapToGrid ? 'text-blueprint font-bold bg-blueprint/5' : 'text-ink-soft'
-              }`} 
-              title={isSnapToGrid ? "Magnetic Snap: 20px ON" : "Magnetic Snap: OFF (Freeform)"}
-            >
-              <Magnet className={`w-3.5 h-3.5 ${isSnapToGrid ? 'text-blueprint' : 'text-ink-soft'}`} />
-              <span className="hidden sm:inline">{isSnapToGrid ? 'Snap' : 'Free'}</span>
-            </button>
-
-            <button onClick={handleZoomOut} className="px-2.5 py-1.5 border-r border-line hover:bg-paper flex items-center justify-center cursor-pointer" title="Zoom Out">
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="px-2.5 py-1.5 border-r border-line min-w-[46px] text-center flex items-center justify-center font-bold text-[11px]">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button onClick={handleZoomIn} className="px-2.5 py-1.5 border-r border-line hover:bg-paper flex items-center justify-center cursor-pointer" title="Zoom In">
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={handleFitToScreen} className="px-2.5 py-1.5 border-r border-line hover:bg-paper flex items-center gap-1 cursor-pointer text-[10.5px]" title="Fit Diagram to Canvas View">
-              <Maximize2 className="w-3 h-3 text-blueprint" />
-              <span>Fit</span>
-            </button>
-            <button onClick={handleResetZoom} className="px-2.5 py-1.5 hover:bg-paper flex items-center justify-center cursor-pointer text-[10.5px]" title="Center Diagram">
-              Reset
-            </button>
-          </div>
+          {/* Canvas Minimap / Overview Navigator */}
+          <Minimap
+            nodes={nodes}
+            pan={pan}
+            zoom={zoom}
+            onPanChange={setPan}
+          />
 
           {/* Canvas content element translation viewport */}
           <div
@@ -3551,543 +2387,41 @@ export const Editor: React.FC = () => {
           >
             {/* SVG rendering layer */}
             <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-auto overflow-visible">
-              <defs>
-                <marker
-                  id="arrow"
-                  viewBox="0 0 10 10"
-                  refX="6"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={dc.ink} />
-                </marker>
-                <marker
-                  id="arrow-selected"
-                  viewBox="0 0 10 10"
-                  refX="6"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={dc.blueprint} />
-                </marker>
+              <EdgeLayer
+                edges={edges}
+                nodes={nodes}
+                selectedEdgeId={selectedEdgeId}
+                activeMode={activeMode}
+                edgeReconnectTarget={edgeReconnectTarget}
+                connectingPort={connectingPort}
+                snappedPort={snappedPort}
+                tempEdgeEnd={tempEdgeEnd}
+                diagramType={diagram?.type}
+                onSelectEdge={(id) => {
+                  setSelectedEdgeId(id);
+                  setSelectedNodeIds([]);
+                  setSelectedDrawingId(null);
+                }}
+                handleEdgeReconnectStart={handleEdgeReconnectStart}
+                handleEdgeRouteDragStart={handleEdgeRouteDragStart}
+                resetSelectedEdgeRoute={resetSelectedEdgeRoute}
+              />
 
-                {/* Crow's Foot: One (|) */}
-                <marker
-                  id="crows-one"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                </marker>
-                <marker
-                  id="crows-one-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                </marker>
-
-                {/* Crow's Foot: One and only one (||) */}
-                <marker
-                  id="crows-one-only"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <line x1="7" y1="2" x2="7" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                </marker>
-                <marker
-                  id="crows-one-only-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <line x1="7" y1="2" x2="7" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="12" y1="2" x2="12" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                </marker>
-
-                {/* Crow's Foot: Zero or One (o|) */}
-                <marker
-                  id="crows-zero-one"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <circle cx="10" cy="8" r="3.75" fill={dc.paperRaised} stroke={dc.ink} strokeWidth="1.5" />
-                </marker>
-                <marker
-                  id="crows-zero-one-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <circle cx="10" cy="8" r="3.75" fill={dc.paperRaised} stroke={dc.blueprint} strokeWidth="2.2" />
-                </marker>
-
-                {/* Crow's Foot: Many (3-prong fork) */}
-                <marker
-                  id="crows-many"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                </marker>
-                <marker
-                  id="crows-many-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                </marker>
-
-                {/* Crow's Foot: One or More / One or Many (|{) */}
-                <marker
-                  id="crows-one-many"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <line x1="4" y1="2" x2="4" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                </marker>
-                <marker
-                  id="crows-one-many-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <line x1="4" y1="2" x2="4" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="5" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                </marker>
-
-                {/* Crow's Foot: Zero or More / Zero-Many (o{) */}
-                <marker
-                  id="crows-zero-many"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.ink} strokeWidth="1.5" />
-                  <circle cx="4" cy="8" r="3" fill={dc.paperRaised} stroke={dc.ink} strokeWidth="1.5" />
-                  <line x1="7" y1="8" x2="15.5" y2="2" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="7" y1="8" x2="15.5" y2="14" stroke={dc.ink} strokeWidth="1.5" strokeLinecap="round" />
-                </marker>
-                <marker
-                  id="crows-zero-many-selected"
-                  viewBox="0 0 16 16"
-                  refX="16"
-                  refY="8"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <line x1="0" y1="8" x2="16" y2="8" stroke={dc.blueprint} strokeWidth="2.5" />
-                  <circle cx="4" cy="8" r="3" fill={dc.paperRaised} stroke={dc.blueprint} strokeWidth="2.2" />
-                  <line x1="7" y1="8" x2="15.5" y2="2" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                  <line x1="7" y1="8" x2="15.5" y2="14" stroke={dc.blueprint} strokeWidth="2.5" strokeLinecap="round" />
-                </marker>
-              </defs>
-
-              {/* Render sequence diagram lifelines */}
-              {diagram.type === 'sequence' && nodes
-                .filter(node => node.type !== 'sequence-activation')
-                .map(node => {
-                  const { width, height } = getNodeDimensions(node);
-                  const startX = node.x + width / 2;
-                  const startY = node.y + height;
-                  const endY = startY + 600;
-                  return (
-                    <line
-                      key={`lifeline-${node.id}`}
-                      x1={startX}
-                      y1={startY}
-                      x2={startX}
-                      y2={endY}
-                      stroke={dc.inkSoft}
-                      strokeWidth="1.5"
-                      strokeDasharray="4 4"
-                    />
-                  );
-                })}
-
-              {/* Render freehand pencil drawings */}
-              {drawings.map((draw) => {
-                const isSelected = selectedDrawingId === draw.id;
-                const strokeWidth = draw.width || 2;
-                const strokeColor = draw.color || '#D45B33';
-                const strokeOpacity = draw.opacity ?? 1;
-
-                return (
-                  <g key={draw.id} className="group">
-                    {/* Selected halo indicator */}
-                    {isSelected && (
-                      <path
-                        d={draw.path}
-                        fill="none"
-                        stroke={dc.blueprint}
-                        strokeWidth={strokeWidth + 6}
-                        strokeOpacity={0.35}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    )}
-
-                    {/* Actual visible stroke */}
-                    <path
-                      d={draw.path}
-                      fill="none"
-                      stroke={isSelected ? dc.blueprint : strokeColor}
-                      strokeWidth={strokeWidth}
-                      strokeOpacity={strokeOpacity}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="pointer-events-none"
-                    />
-
-                    {/* Invisible thick hit target for easy selection and erasing */}
-                    <path
-                      d={draw.path}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={Math.max(strokeWidth + 14, 20)}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className={`pointer-events-auto ${
-                        activeMode === 'draw' && pencilTool === 'eraser'
-                          ? 'cursor-cell hover:stroke-signal/20'
-                          : activeMode === 'select'
-                          ? 'cursor-pointer hover:stroke-blueprint/20'
-                          : ''
-                      }`}
-                      onClick={(e) => {
-                        if (activeMode === 'draw' && pencilTool === 'eraser') {
-                          e.stopPropagation();
-                          deleteDrawing(draw.id);
-                        } else if (activeMode === 'select') {
-                          e.stopPropagation();
-                          setSelectedDrawingId(draw.id);
-                          setSelectedNodeIds([]);
-                          setSelectedEdgeId(null);
-                        }
-                      }}
-                      onMouseEnter={(e) => {
-                        if (activeMode === 'draw' && pencilTool === 'eraser' && e.buttons === 1) {
-                          deleteDrawing(draw.id);
-                        }
-                      }}
-                    />
-                  </g>
-                );
-              })}
-
-              {/* Render current active pencil sketch */}
-              {activeDrawingPoints && activeDrawingPoints.length > 1 && (() => {
-                const isHighlighter = pencilTool === 'highlighter';
-                return (
-                  <path
-                    d={pointsToSmoothSvgPath(activeDrawingPoints)}
-                    fill="none"
-                    stroke={pencilColor}
-                    strokeWidth={isHighlighter ? Math.max(pencilWidth, 8) : pencilWidth}
-                    strokeOpacity={isHighlighter ? 0.4 : 1}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                );
-              })()}
-
-              {/* Render connector edges */}
-              {edges.map((edge) => {
-                const isSelected = selectedEdgeId === edge.id;
-                const path = getEdgePath(edge);
-                if (!path) return null;
-                const pathPoints = getEdgePathPoints(path);
-
-                const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
-                const labelY = routeLabelY - 8;
-
-                return (
-                  <g key={edge.id} className="cursor-pointer">
-                    <path
-                      d={path}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth="14"
-                      onMouseDown={(e) => {
-                        if (activeMode !== 'select') return;
-                        e.stopPropagation();
-                        setSelectedEdgeId(edge.id);
-                        setSelectedNodeIds([]);
-                        setSelectedDrawingId(null);
-                      }}
-                      onClick={(e) => {
-                        if (activeMode !== 'select') return;
-                        e.stopPropagation();
-                        setSelectedEdgeId(edge.id);
-                        setSelectedNodeIds([]);
-                        setSelectedDrawingId(null);
-                      }}
-                    />
-                    {(() => {
-                      const markerStartUrl = getMarkerUrl(edge.sourceMarker, edge.arrow, true, isSelected);
-                      const markerEndUrl = getMarkerUrl(edge.targetMarker, edge.arrow, false, isSelected);
-                      return (
-                        <path
-                          key={`edge-${edge.id}-${isSelected ? '1' : '0'}`}
-                          d={path}
-                          fill="none"
-                          stroke={isSelected ? dc.blueprint : dc.ink}
-                          strokeWidth={isSelected ? '2.5' : '1.5'}
-                          strokeDasharray={edge.style === 'dashed' ? '5 5' : undefined}
-                          markerStart={markerStartUrl}
-                          markerEnd={markerEndUrl}
-                          onMouseDown={(e) => {
-                            if (activeMode !== 'select') return;
-                            e.stopPropagation();
-                            setSelectedEdgeId(edge.id);
-                            setSelectedNodeIds([]);
-                            setSelectedDrawingId(null);
-                          }}
-                          onClick={(e) => {
-                            if (activeMode !== 'select') return;
-                            e.stopPropagation();
-                            setSelectedEdgeId(edge.id);
-                            setSelectedNodeIds([]);
-                            setSelectedDrawingId(null);
-                          }}
-                        />
-                      );
-                    })()}
-                    {isSelected && (
-                      <path
-                        d={path}
-                        fill="none"
-                        stroke="#00A8FF"
-                        strokeWidth="1.25"
-                        strokeDasharray="4 3"
-                        strokeLinecap="round"
-                        className="pointer-events-none"
-                      />
-                    )}
-                    {isSelected && pathPoints.length >= 2 && (
-                      <g>
-                        {/* Drag either endpoint onto a shape port to reconnect the line. */}
-                        {([
-                          { point: pathPoints[0], endpoint: 'source' as const, port: edge.sourceHandle || 'right' },
-                          { point: pathPoints[pathPoints.length - 1], endpoint: 'target' as const, port: edge.targetHandle || 'left' }
-                        ]).map(({ point, endpoint, port }) => {
-                          const offset = port === 'top' ? { x: 0, y: -10 } : port === 'bottom' ? { x: 0, y: 10 } : port === 'left' ? { x: -10, y: 0 } : { x: 10, y: 0 };
-                          return (
-                            <circle
-                              key={`endpoint-${edge.id}-${endpoint}`}
-                              cx={point.x + offset.x}
-                              cy={point.y + offset.y}
-                              r="5"
-                              fill="#00A8FF"
-                              stroke={dc.paperRaised}
-                              strokeWidth="2"
-                              className="cursor-crosshair"
-                              onMouseDown={(e) => handleEdgeReconnectStart(e, edge.id, endpoint)}
-                            />
-                          );
-                        })}
-                        {edgeReconnectTarget && (() => {
-                          const targetNode = nodes.find(node => node.id === edgeReconnectTarget.nodeId);
-                          if (!targetNode) return null;
-                          const targetPoint = getPortCoords(targetNode, edgeReconnectTarget.port);
-                          return (
-                            <circle
-                              cx={targetPoint.x}
-                              cy={targetPoint.y}
-                              r="8"
-                              fill="none"
-                              stroke={dc.signal}
-                              strokeWidth="2"
-                              strokeDasharray="3 2"
-                              className="pointer-events-none"
-                            />
-                          );
-                        })()}
-
-                        {/* Corners can be moved directly; auto-routes become manual when edited. */}
-                        {(edge.routeMode === 'manual' && edge.waypoints?.length ? edge.waypoints : pathPoints.slice(1, -1)).map((point, index) => (
-                          <circle
-                            key={`corner-${edge.id}-${index}`}
-                            cx={point.x}
-                            cy={point.y}
-                            r="5"
-                            fill="#00A8FF"
-                            stroke={dc.paperRaised}
-                            strokeWidth="2"
-                            className="cursor-move"
-                            onMouseDown={(e) => handleEdgeRouteDragStart(e, edge, pathPoints, undefined, index)}
-                          />
-                        ))}
-
-                        {/* Mid-segment handles create or reposition an editable route control. */}
-                        {pathPoints.slice(0, -1).map((point, index) => {
-                          const next = pathPoints[index + 1];
-                          if (Math.hypot(next.x - point.x, next.y - point.y) < 28) return null;
-                          return (
-                            <circle
-                              key={`segment-${edge.id}-${index}`}
-                              cx={(point.x + next.x) / 2}
-                              cy={(point.y + next.y) / 2}
-                              r="4.5"
-                              fill="#00A8FF"
-                              stroke={dc.paperRaised}
-                              strokeWidth="2"
-                              className={point.y === next.y ? 'cursor-ns-resize' : 'cursor-ew-resize'}
-                              onMouseDown={(e) => handleEdgeRouteDragStart(e, edge, pathPoints, index)}
-                            />
-                          );
-                        })}
-                        {edge.routeMode === 'manual' && (
-                          <g
-                            className="cursor-pointer"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              resetSelectedEdgeRoute();
-                            }}
-                          >
-                            <rect
-                              x={labelX - 25}
-                              y={labelY + 14}
-                              width="50"
-                              height="20"
-                              rx="10"
-                              fill={dc.paperRaised}
-                              stroke="#00A8FF"
-                              strokeWidth="1.25"
-                            />
-                            <text
-                              x={labelX}
-                              y={labelY + 27.5}
-                              fill={dc.blueprint}
-                              textAnchor="middle"
-                              className="font-mono text-[9px] font-bold pointer-events-none"
-                            >
-                              RESET
-                            </text>
-                          </g>
-                        )}
-                      </g>
-                    )}
-                    {edge.label && (
-                      <g className="pointer-events-none">
-                        <rect
-                          x={labelX - (edge.label.length * 3.5 + 8)}
-                          y={labelY - 9}
-                          width={edge.label.length * 7 + 16}
-                          height="18"
-                          fill={dc.paperRaised}
-                          stroke={dc.ink}
-                          strokeWidth="1.5"
-                          rx="2"
-                        />
-                        <text
-                          x={labelX}
-                          y={labelY + 3.5}
-                          fill={dc.ink}
-                          className="font-mono text-[10px] font-bold select-none text-center"
-                          textAnchor="middle"
-                        >
-                          {edge.label}
-                        </text>
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-
-              {/* Render temporary connect port edge line */}
-              {connectingPort && (() => {
-                const srcNode = nodes.find(n => n.id === connectingPort.nodeId);
-                if (!srcNode) return null;
-                const start = getPortCoords(srcNode, connectingPort.port);
-                return (
-                  <g>
-                    <line
-                      x1={start.x}
-                      y1={start.y}
-                      x2={tempEdgeEnd.x}
-                      y2={tempEdgeEnd.y}
-                      stroke={snappedPort ? "#00A8FF" : dc.blueprint}
-                      strokeWidth={snappedPort ? "2" : "1.5"}
-                      strokeDasharray="4 4"
-                      markerEnd="url(#arrow)"
-                    />
-                    {snappedPort && (
-                      <circle
-                        cx={tempEdgeEnd.x}
-                        cy={tempEdgeEnd.y}
-                        r="6"
-                        fill="#00A8FF"
-                        fillOpacity="0.35"
-                        stroke="#00A8FF"
-                        strokeWidth="1.5"
-                      />
-                    )}
-                  </g>
-                );
-              })()}
+              <FreehandLayer
+                drawings={drawings}
+                selectedDrawingId={selectedDrawingId}
+                activeMode={activeMode}
+                pencilTool={pencilTool}
+                pencilColor={pencilColor}
+                pencilWidth={pencilWidth}
+                activeDrawingPoints={activeDrawingPoints}
+                deleteDrawing={deleteDrawing}
+                onSelectDrawing={(id) => {
+                  setSelectedDrawingId(id);
+                  setSelectedNodeIds([]);
+                  setSelectedEdgeId(null);
+                }}
+              />
 
               {/* Dynamic magnetic alignment guide lines */}
               {alignmentGuides.map((guide, idx) => (
@@ -4131,6 +2465,7 @@ export const Editor: React.FC = () => {
                 const effectiveFontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
                 const textStyleObj: React.CSSProperties = { fontSize: `${effectiveFontSize}px` };
                 const textClass = `${node.textAlign === 'left' ? 'text-left' : node.textAlign === 'right' ? 'text-right' : 'text-center'} ${node.isBold === false ? 'font-normal' : 'font-bold'}`;
+                const flexAlignClass = node.textAlign === 'left' ? 'justify-start text-left' : node.textAlign === 'right' ? 'justify-end text-right' : 'justify-center text-center';
 
                 let shapeClasses = "bg-paper-raised border-ink flex flex-col justify-between p-4";
                 if (isDiamond) {
@@ -4303,7 +2638,7 @@ export const Editor: React.FC = () => {
                       </div>
                     ) : node.type === 'text' ? (
                       <div 
-                        className={`font-mono select-none w-full h-full flex items-center justify-center leading-normal px-2 ${textClass}`}
+                        className={`font-mono select-none w-full h-full flex items-center leading-normal px-2 ${flexAlignClass} ${node.isBold === false ? 'font-normal' : 'font-bold'}`}
                         style={textStyleObj}
                       >
                         {node.label}
@@ -4327,7 +2662,7 @@ export const Editor: React.FC = () => {
                       </div>
                     ) : node.type === 'dfd-store' ? (
                       <div 
-                        className={`font-mono ${textClass} select-none h-full flex items-center justify-center px-2`}
+                        className={`font-mono select-none h-full flex items-center px-2 ${flexAlignClass} ${node.isBold === false ? 'font-normal' : 'font-bold'}`}
                         style={textStyleObj}
                       >
                         {node.label}
@@ -4446,7 +2781,7 @@ export const Editor: React.FC = () => {
                       <div className="w-full h-full select-none" />
                     ) : (
                       <div 
-                        className={`font-mono ${textClass} select-none h-full flex items-center justify-center px-2`}
+                        className={`font-mono select-none h-full flex items-center px-2 ${flexAlignClass} ${node.isBold === false ? 'font-normal' : 'font-bold'}`}
                         style={textStyleObj}
                       >
                         {node.label}
@@ -4711,1076 +3046,44 @@ export const Editor: React.FC = () => {
           />
         )}
 
-        {/* Right Side: Dedicated Shape Properties & Inspector Sidebar */}
-        <aside 
-          className={`
-            fixed lg:static inset-y-0 right-0 z-40 lg:z-10
-            h-full border-l-2 border-ink bg-paper flex flex-col shrink-0 select-none overflow-hidden
-            transition-all duration-200 ease-in-out shadow-hard-ink lg:shadow-none
-            ${isRightSidebarOpen ? 'w-[290px] translate-x-0' : 'w-0 translate-x-full lg:translate-x-0 lg:w-0 border-l-0'}
-          `}
-        >
-          {/* Inspector Header */}
-          <div className="h-11 border-b-2 border-ink px-4 flex items-center justify-between bg-paper-raised shrink-0">
-            <div className="flex items-center gap-2">
-              <Sliders className="w-3.5 h-3.5 text-blueprint" />
-              <span className="font-mono text-[11px] text-ink font-bold uppercase tracking-wider">
-                {hasSelection ? 'Shape Properties' : activeEdge ? 'Connector' : 'Properties'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {hasSelection && (
-                <button 
-                  onClick={deleteSelectedNodes} 
-                  className="text-ink-soft hover:text-signal transition-colors p-1 cursor-pointer" 
-                  title="Delete Selection"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-              {activeEdge && (
-                <button 
-                  onClick={deleteSelectedEdge} 
-                  className="text-ink-soft hover:text-signal transition-colors p-1 cursor-pointer" 
-                  title="Delete Connector"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-              <button 
-                onClick={() => setIsRightSidebarOpen(false)}
-                className="lg:hidden text-ink-soft hover:text-ink text-[11px] font-mono cursor-pointer"
-              >
-                [close]
-              </button>
-            </div>
-          </div>
-
-          {/* Inspector Body */}
-          <div className="p-4 flex-1 flex flex-col justify-between overflow-y-auto">
-            {hasSelection && activeNode ? (
-              <div className="flex flex-col gap-3.5">
-                {/* Shape Type & Morpher */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center border-b border-line pb-1">
-                    <span>MORPH_SHAPE</span>
-                    <span className="text-blueprint font-bold uppercase">{activeNode.type}</span>
-                  </div>
-                  <select
-                    value={activeNode.type}
-                    onChange={(e) => morphSelectedNodeType(e.target.value as CanvasNode['type'])}
-                    className="w-full border-2 border-ink bg-paper px-2 py-1.5 text-[11px] font-mono focus:border-blueprint focus:outline-none cursor-pointer"
-                  >
-                    {AVAILABLE_SHAPE_TYPES.map((st) => (
-                      <option key={st.type} value={st.type}>
-                        {st.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Rename label */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">SHAPE_LABEL</label>
-                  <input
-                    type="text"
-                    value={activeNode.label}
-                    onChange={(e) => updateSelectedNodeLabel(e.target.value)}
-                    className="w-full border-2 border-ink bg-paper px-3 py-1.5 text-[12px] font-mono focus:border-blueprint focus:outline-none"
-                  />
-                </div>
-
-                {/* Table Fields manager for ERD tables */}
-                {activeNode.type === 'table' && (
-                  <div className="flex flex-col gap-2">
-                    <label className="font-mono text-[10px] text-ink-soft flex justify-between items-center font-bold">
-                      <span>TABLE_COLUMNS</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentFields = activeNode.fields || [];
-                          updateSelectedNodeFields([...currentFields, 'column text']);
-                        }}
-                        className="flex items-center gap-1 text-blueprint hover:underline uppercase text-[9px] font-bold cursor-pointer"
-                      >
-                        <div className="w-3.5 h-3.5 rounded-full bg-blueprint border border-ink flex items-center justify-center shrink-0">
-                          <Plus size={8} strokeWidth={3} className="text-white" />
-                        </div>
-                        <span>Add Column</span>
-                      </button>
-                    </label>
-                    
-                    <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto pr-1">
-                      {(activeNode.fields || []).map((field, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={field}
-                            onChange={(e) => {
-                              const copy = [...(activeNode.fields || [])];
-                              copy[idx] = e.target.value;
-                              updateSelectedNodeFields(copy);
-                            }}
-                            className="flex-1 border border-ink bg-paper px-2 py-1 text-[11px] font-mono focus:border-blueprint focus:outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const copy = (activeNode.fields || []).filter((_, fIdx) => fIdx !== idx);
-                              updateSelectedNodeFields(copy);
-                            }}
-                            className="text-ink-soft hover:text-signal p-0.5 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Typography formatting */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">TEXT_FORMATTING</label>
-                  
-                  {/* Row 1: S/M/L Presets + Custom Size px Input */}
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-3 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {(['sm', 'md', 'lg'] as const).map((size) => {
-                        const standardPx = size === 'sm' ? 11 : size === 'md' ? 13 : 16;
-                        const isActive = !activeNode.customFontSize && (activeNode.fontSize || 'md') === size;
-                        return (
-                          <button
-                            key={size}
-                            type="button"
-                            onClick={() => {
-                              updateSelectedNodeProperties({
-                                fontSize: size,
-                                customFontSize: undefined
-                              });
-                            }}
-                            className={`py-1 border-r last:border-r-0 border-ink cursor-pointer uppercase ${
-                              isActive ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                            }`}
-                            title={`Font Size: ${size} (${standardPx}px)`}
-                          >
-                            {size === 'sm' ? 'S' : size === 'md' ? 'M' : 'L'}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="flex items-center gap-1 border-2 border-ink bg-paper px-1.5 py-0.5">
-                      <input
-                        type="number"
-                        min="8"
-                        max="72"
-                        value={activeNode.customFontSize ?? (activeNode.fontSize === 'sm' ? 11 : activeNode.fontSize === 'lg' ? 16 : 13)}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (!isNaN(v) && v >= 6 && v <= 100) {
-                            updateSelectedNodeProperty('customFontSize', v);
-                          }
-                        }}
-                        className="w-8 text-center font-mono text-[11px] font-bold bg-transparent text-ink focus:outline-none"
-                      />
-                      <span className="font-mono text-[10px] text-ink-soft">px</span>
-                    </div>
-                  </div>
-
-                  {/* Row 2: Alignment and Bold Toggles */}
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <div className="flex-1 flex border-2 border-ink bg-paper">
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'left')}
-                        className={`flex-1 p-1 border-r border-ink cursor-pointer flex items-center justify-center ${
-                          activeNode.textAlign === 'left' ? 'bg-ink text-paper' : 'text-ink-soft'
-                        }`}
-                        title="Align Left"
-                      >
-                        <AlignLeft className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'center')}
-                        className={`flex-1 p-1 border-r border-ink cursor-pointer flex items-center justify-center ${
-                          (activeNode.textAlign || 'center') === 'center' ? 'bg-ink text-paper' : 'text-ink-soft'
-                        }`}
-                        title="Align Center"
-                      >
-                        <AlignCenter className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'right')}
-                        className={`flex-1 p-1 cursor-pointer flex items-center justify-center ${
-                          activeNode.textAlign === 'right' ? 'bg-ink text-paper' : 'text-ink-soft'
-                        }`}
-                        title="Align Right"
-                      >
-                        <AlignRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedNodeProperty('isBold', activeNode.isBold === false ? true : false)}
-                      className={`px-2.5 py-1 border-2 border-ink cursor-pointer flex items-center justify-center ${
-                        activeNode.isBold !== false ? 'bg-ink text-paper font-bold' : 'bg-paper text-ink-soft'
-                      }`}
-                      title="Toggle Bold"
-                    >
-                      <Bold className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Border style & width */}
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">BORDER_STYLE</label>
-                    <div className="grid grid-cols-4 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {(['none', 'solid', 'dashed', 'dotted'] as const).map((style) => (
-                        <button
-                          key={style}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('borderStyle', style)}
-                          className={`py-1.5 border-r last:border-r-0 border-ink capitalize cursor-pointer ${
-                            (activeNode.borderStyle || (activeNode.type === 'text' ? 'none' : activeNode.type === 'usecase-boundary' ? 'dashed' : 'solid')) === style
-                              ? 'bg-ink text-paper font-bold'
-                              : 'text-ink-soft'
-                          }`}
-                        >
-                          {style}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">BORDER_WIDTH</label>
-                    <div className="grid grid-cols-3 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {([1, 2, 3] as const).map((w) => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('borderWidth', w)}
-                          className={`py-1.5 border-r last:border-r-0 border-ink cursor-pointer ${
-                            (activeNode.borderWidth ?? (activeNode.type === 'text' ? 1 : 2)) === w ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                          }`}
-                          title={`${w}px width`}
-                        >
-                          {w}px
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Fill Color */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center">
-                    <span>FILL_COLOR</span>
-                    <input
-                      type="text"
-                      value={activeNode.fillColor || '#FFFFFF'}
-                      onChange={(e) => updateSelectedNodeProperty('fillColor', e.target.value)}
-                      placeholder="#FFFFFF"
-                      className="w-20 border border-ink bg-paper px-1.5 py-0.5 text-[10px] font-mono focus:border-blueprint focus:outline-none uppercase text-center"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-7 border-2 border-ink bg-paper p-0.5 gap-0.5">
-                      {FILL_COLOR_PRESETS.map((p) => {
-                        const isCurrent = (activeNode.fillColor || '#FFFFFF').toLowerCase() === p.value.toLowerCase() || (!activeNode.fillColor && p.value === '#FFFFFF');
-                        return (
-                          <button
-                            key={p.value}
-                            type="button"
-                            onClick={() => updateSelectedNodeProperty('fillColor', p.value)}
-                            className={`h-5 rounded-none border border-ink/40 flex items-center justify-center cursor-pointer ${
-                              isCurrent ? 'ring-2 ring-blueprint z-10' : ''
-                            }`}
-                            style={{ backgroundColor: p.bg === 'transparent' ? '#FFFFFF' : p.bg }}
-                            title={p.label}
-                          >
-                            {p.bg === 'transparent' && <span className="text-[9px] text-signal font-bold leading-none">✕</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <label className="border-2 border-ink bg-paper p-1 cursor-pointer flex items-center justify-center relative w-7 h-7 shrink-0" title="Custom Fill Color">
-                      <input
-                        type="color"
-                        value={activeNode.fillColor && activeNode.fillColor !== 'transparent' && activeNode.fillColor.startsWith('#') ? activeNode.fillColor : '#ffffff'}
-                        onChange={(e) => updateSelectedNodeProperty('fillColor', e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-3.5 h-3.5 text-blueprint" />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Shadow Accent */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center">
-                    <span>SHADOW_ACCENT</span>
-                    <input
-                      type="text"
-                      value={activeNode.shadowAccent || (activeNode.type === 'text' ? 'none' : '#1E5C8C')}
-                      onChange={(e) => updateSelectedNodeProperty('shadowAccent', e.target.value)}
-                      placeholder="#1E5C8C"
-                      className="w-20 border border-ink bg-paper px-1.5 py-0.5 text-[10px] font-mono focus:border-blueprint focus:outline-none uppercase text-center"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-7 border-2 border-ink bg-paper p-0.5 gap-0.5">
-                      {SHADOW_COLOR_PRESETS.map((p) => {
-                        const currentShadow = activeNode.shadowAccent || (activeNode.type === 'text' ? 'none' : activeNode.width === 2 ? '#D45B33' : activeNode.width === 3 ? '#15191C' : '#1E5C8C');
-                        const isCurrent = currentShadow.toLowerCase() === p.value.toLowerCase();
-                        return (
-                          <button
-                            key={p.value}
-                            type="button"
-                            onClick={() => updateSelectedNodeProperty('shadowAccent', p.value)}
-                            className={`h-5 rounded-none border border-ink/40 flex items-center justify-center cursor-pointer ${
-                              isCurrent ? 'ring-2 ring-blueprint z-10' : ''
-                            }`}
-                            style={{ backgroundColor: p.bg }}
-                            title={p.label}
-                          >
-                            {p.value === 'none' && <span className="text-[9px] text-ink-soft font-bold leading-none">✕</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <label className="border-2 border-ink bg-paper p-1 cursor-pointer flex items-center justify-center relative w-7 h-7 shrink-0" title="Custom Shadow Color">
-                      <input
-                        type="color"
-                        value={activeNode.shadowAccent && activeNode.shadowAccent !== 'none' && activeNode.shadowAccent.startsWith('#') ? activeNode.shadowAccent : '#1E5C8C'}
-                        onChange={(e) => updateSelectedNodeProperty('shadowAccent', e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-3.5 h-3.5 text-ink" />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Layer Arrangement */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">LAYER_ORDER</label>
-                  <div className="grid grid-cols-4 border-2 border-ink font-mono text-[10px] text-center bg-paper">
-                    <button
-                      type="button"
-                      onClick={bringToFront}
-                      className="py-1 border-r border-ink cursor-pointer flex flex-col items-center justify-center gap-0.5"
-                      title="Bring to Front"
-                    >
-                      <ChevronsUp className="w-3.5 h-3.5 text-blueprint" />
-                      <span>Front</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={bringForward}
-                      className="py-1 border-r border-ink cursor-pointer flex flex-col items-center justify-center gap-0.5"
-                      title="Bring Forward"
-                    >
-                      <ChevronUp className="w-3.5 h-3.5" />
-                      <span>Up</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={sendBackward}
-                      className="py-1 border-r border-ink cursor-pointer flex flex-col items-center justify-center gap-0.5"
-                      title="Send Backward"
-                    >
-                      <ChevronDown className="w-3.5 h-3.5" />
-                      <span>Down</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={sendToBack}
-                      className="py-1 cursor-pointer flex flex-col items-center justify-center gap-0.5"
-                      title="Send to Back"
-                    >
-                      <ChevronsDown className="w-3.5 h-3.5 text-blueprint" />
-                      <span>Back</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Node Geometry Details Badge */}
-                <div className="p-2.5 border border-line bg-paper-raised font-mono text-[10px] text-ink-soft flex flex-col gap-1.5">
-                  <div className="flex justify-between">
-                    <span>Position:</span>
-                    <span className="text-ink font-bold">X {activeNode.x}, Y {activeNode.y}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>Size:</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={getNodeDimensions(activeNode).width}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (isNaN(v) || v < getMinDimensions(activeNode).width) return;
-                          const isDiamondType = activeNode.type === 'decision' || activeNode.type === 'activity-decision';
-                          const nextNodes = nodes.map(n =>
-                            n.id === activeNode.id ? { ...n, customWidth: v, ...(isDiamondType ? { customHeight: v } : {}) } : n
-                          );
-                          setNodes(nextNodes);
-                          saveHistoryState(nextNodes, edges, drawings);
-                        }}
-                        className="w-12 px-1 py-0.5 border border-ink bg-paper text-ink font-bold text-center text-[10px] font-mono"
-                        min={getMinDimensions(activeNode).width}
-                      />
-                      <span className="text-ink-soft">×</span>
-                      <input
-                        type="number"
-                        value={getNodeDimensions(activeNode).height}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (isNaN(v) || v < getMinDimensions(activeNode).height) return;
-                          const isDiamondType = activeNode.type === 'decision' || activeNode.type === 'activity-decision';
-                          const nextNodes = nodes.map(n =>
-                            n.id === activeNode.id ? { ...n, customHeight: v, ...(isDiamondType ? { customWidth: v } : {}) } : n
-                          );
-                          setNodes(nextNodes);
-                          saveHistoryState(nextNodes, edges, drawings);
-                        }}
-                        className="w-12 px-1 py-0.5 border border-ink bg-paper text-ink font-bold text-center text-[10px] font-mono"
-                        min={getMinDimensions(activeNode).height}
-                      />
-                      <span className="text-ink-soft">px</span>
-                    </div>
-                  </div>
-                  {(activeNode.customWidth || activeNode.customHeight) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextNodes = nodes.map(n =>
-                          n.id === activeNode.id ? { ...n, customWidth: undefined, customHeight: undefined } : n
-                        );
-                        setNodes(nextNodes);
-                        saveHistoryState(nextNodes, edges, drawings);
-                      }}
-                      className="text-[9px] text-blueprint hover:underline cursor-pointer text-right font-bold"
-                    >
-                      Reset to default size
-                    </button>
-                  )}
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={duplicateSelection}
-                    className="flex-1 py-1.5 px-2 border border-ink bg-paper hover:bg-paper-raised font-mono text-[11px] font-bold text-center cursor-pointer transition-colors"
-                  >
-                    Duplicate (Ctrl+D)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={deleteSelectedNodes}
-                    className="py-1.5 px-3 border border-signal text-signal hover:bg-signal hover:text-paper font-mono text-[11px] font-bold text-center cursor-pointer transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ) : hasSelection && selectedNodeIds.length > 1 ? (
-              <div className="flex flex-col gap-3.5">
-                <div className="font-mono text-[11px] text-ink-soft font-bold border-b border-line pb-1.5">
-                  MULTI_SELECTION ({selectedNodeIds.length})
-                </div>
-
-                {/* Batch Text Style */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">TEXT_FORMATTING</label>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-3 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {(['sm', 'md', 'lg'] as const).map((size) => (
-                        <button
-                          key={size}
-                          type="button"
-                          onClick={() => {
-                            updateSelectedNodeProperties({
-                              fontSize: size,
-                              customFontSize: undefined
-                            });
-                          }}
-                          className="py-1 border-r last:border-r-0 border-ink cursor-pointer uppercase text-ink-soft"
-                        >
-                          {size === 'sm' ? 'S' : size === 'md' ? 'M' : 'L'}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1 border-2 border-ink bg-paper px-1.5 py-0.5">
-                      <input
-                        type="number"
-                        min="8"
-                        max="72"
-                        placeholder="13"
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (!isNaN(v) && v >= 6 && v <= 100) {
-                            updateSelectedNodeProperty('customFontSize', v);
-                          }
-                        }}
-                        className="w-8 text-center font-mono text-[11px] font-bold bg-transparent text-ink focus:outline-none"
-                      />
-                      <span className="font-mono text-[10px] text-ink-soft">px</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <div className="flex-1 flex border-2 border-ink bg-paper">
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'left')}
-                        className="flex-1 p-1 border-r border-ink cursor-pointer text-ink-soft flex items-center justify-center"
-                        title="Align Left"
-                      >
-                        <AlignLeft className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'center')}
-                        className="flex-1 p-1 border-r border-ink cursor-pointer text-ink-soft flex items-center justify-center"
-                        title="Align Center"
-                      >
-                        <AlignCenter className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedNodeProperty('textAlign', 'right')}
-                        className="flex-1 p-1 cursor-pointer text-ink-soft flex items-center justify-center"
-                        title="Align Right"
-                      >
-                        <AlignRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedNodeProperty('isBold', true)}
-                      className="px-2.5 py-1 border-2 border-ink cursor-pointer bg-paper text-ink-soft font-bold flex items-center justify-center"
-                      title="Set Bold"
-                    >
-                      <Bold className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Batch Border Style & Width */}
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">BORDER_STYLE</label>
-                    <div className="grid grid-cols-4 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {(['none', 'solid', 'dashed', 'dotted'] as const).map((style) => (
-                        <button
-                          key={style}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('borderStyle', style)}
-                          className="py-1.5 border-r last:border-r-0 border-ink capitalize cursor-pointer text-ink-soft"
-                        >
-                          {style}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">BORDER_WIDTH</label>
-                    <div className="grid grid-cols-3 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                      {([1, 2, 3] as const).map((w) => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('borderWidth', w)}
-                          className="py-1.5 border-r last:border-r-0 border-ink cursor-pointer text-ink-soft"
-                        >
-                          {w}px
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Batch Fill Color */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center">
-                    <span>FILL_COLOR</span>
-                    <input
-                      type="text"
-                      placeholder="#HEX"
-                      onChange={(e) => updateSelectedNodeProperty('fillColor', e.target.value)}
-                      className="w-20 border border-ink bg-paper px-1.5 py-0.5 text-[10px] font-mono focus:border-blueprint focus:outline-none uppercase text-center"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-7 border-2 border-ink bg-paper p-0.5 gap-0.5">
-                      {FILL_COLOR_PRESETS.map((p) => (
-                        <button
-                          key={p.value}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('fillColor', p.value)}
-                          className="h-5 rounded-none border border-ink/40 flex items-center justify-center cursor-pointer"
-                          style={{ backgroundColor: p.bg === 'transparent' ? '#FFFFFF' : p.bg }}
-                          title={p.label}
-                        >
-                          {p.bg === 'transparent' && <span className="text-[9px] text-signal font-bold leading-none">✕</span>}
-                        </button>
-                      ))}
-                    </div>
-                    <label className="border-2 border-ink bg-paper p-1 cursor-pointer flex items-center justify-center relative w-7 h-7 shrink-0" title="Custom Fill Color">
-                      <input
-                        type="color"
-                        onChange={(e) => updateSelectedNodeProperty('fillColor', e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-3.5 h-3.5 text-blueprint" />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Batch Shadow Accent */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center">
-                    <span>SHADOW_ACCENT</span>
-                    <input
-                      type="text"
-                      placeholder="#HEX"
-                      onChange={(e) => updateSelectedNodeProperty('shadowAccent', e.target.value)}
-                      className="w-20 border border-ink bg-paper px-1.5 py-0.5 text-[10px] font-mono focus:border-blueprint focus:outline-none uppercase text-center"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-7 border-2 border-ink bg-paper p-0.5 gap-0.5">
-                      {SHADOW_COLOR_PRESETS.map((p) => (
-                        <button
-                          key={p.value}
-                          type="button"
-                          onClick={() => updateSelectedNodeProperty('shadowAccent', p.value)}
-                          className="h-5 rounded-none border border-ink/40 flex items-center justify-center cursor-pointer"
-                          style={{ backgroundColor: p.bg }}
-                          title={p.label}
-                        >
-                          {p.value === 'none' && <span className="text-[9px] text-ink-soft font-bold leading-none">✕</span>}
-                        </button>
-                      ))}
-                    </div>
-                    <label className="border-2 border-ink bg-paper p-1 cursor-pointer flex items-center justify-center relative w-7 h-7 shrink-0" title="Custom Shadow Color">
-                      <input
-                        type="color"
-                        onChange={(e) => updateSelectedNodeProperty('shadowAccent', e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-3.5 h-3.5 text-ink" />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Batch Layer Order */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">LAYER_ORDER</label>
-                  <div className="grid grid-cols-2 border-2 border-ink font-mono text-[10px] text-center bg-paper">
-                    <button
-                      type="button"
-                      onClick={bringToFront}
-                      className="py-1.5 border-r border-ink cursor-pointer flex items-center justify-center gap-1 font-bold text-blueprint"
-                    >
-                      <ChevronsUp className="w-3.5 h-3.5" />
-                      <span>To Front</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={sendToBack}
-                      className="py-1.5 cursor-pointer flex items-center justify-center gap-1 font-bold text-blueprint"
-                    >
-                      <ChevronsDown className="w-3.5 h-3.5" />
-                      <span>To Back</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Batch Actions */}
-                <div className="flex flex-col gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={duplicateSelection}
-                    className="w-full py-1.5 border border-ink bg-paper hover:bg-paper-raised font-mono text-[11px] font-bold cursor-pointer transition-colors"
-                  >
-                    Duplicate Selection ({selectedNodeIds.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={deleteSelectedNodes}
-                    className="w-full py-1.5 border-2 border-signal text-signal hover:bg-signal hover:text-paper font-mono text-[11px] font-bold cursor-pointer transition-colors"
-                  >
-                    Delete Selected ({selectedNodeIds.length})
-                  </button>
-                </div>
-              </div>
-            ) : activeEdge ? (
-              <div className="flex flex-col gap-4">
-                <div className="font-mono text-[11px] text-ink-soft font-bold border-b border-line pb-1.5 flex items-center justify-between">
-                  <span>CONNECTOR_PROPERTIES</span>
-                  {diagram?.type === 'erd' && (
-                    <span className="text-[9px] text-blueprint border border-blueprint px-1 font-mono uppercase">ERD</span>
-                  )}
-                </div>
-
-                {/* Edge relationship label */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">LINE_LABEL</label>
-                  <input
-                    type="text"
-                    value={activeEdge.label || ''}
-                    onChange={(e) => updateSelectedEdgeLabel(e.target.value)}
-                    className="w-full border-2 border-ink bg-paper px-3 py-2 text-[13px] font-mono focus:border-blueprint focus:outline-none"
-                    placeholder="e.g. 1:N, places, contains"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 border border-line bg-paper-raised px-2.5 py-2">
-                  <div className="font-mono text-[10px]">
-                    <div className="font-bold text-ink">ROUTE: {activeEdge.routeMode === 'manual' ? 'MANUAL' : 'AUTO'}</div>
-                    <div className="text-ink-soft mt-0.5">Drag the blue line handles to edit.</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={resetSelectedEdgeRoute}
-                    disabled={activeEdge.routeMode !== 'manual'}
-                    className="shrink-0 border border-ink px-2 py-1 font-mono text-[10px] font-bold hover:bg-paper disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    Reset route
-                  </button>
-                </div>
-
-                {/* ERD Cardinality Quick Presets */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">ERD_CARDINALITY_PRESETS</label>
-                    <span className="text-[9.5px] font-mono text-blueprint">Martin / Crow's</span>
-                  </div>
-                  <div className="grid grid-cols-5 gap-1 font-mono text-[10.5px]">
-                    {(['1:N', 'N:1', '1:1', 'M:N', '0..1:N'] as const).map(preset => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => updateSelectedEdgeErdPreset(preset)}
-                        className={`py-1 border border-ink hover:bg-paper-raised cursor-pointer text-center transition-colors ${
-                          activeEdge.label === preset ? 'bg-ink text-paper font-bold' : 'bg-paper text-ink'
-                        }`}
-                        title={`Apply ${preset} Cardinality`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Granular Source Cardinality (Start of connection) */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">
-                      SOURCE: {nodes.find(n => n.id === activeEdge.source)?.label || 'START'}
-                    </label>
-                    <span className="text-[9px] font-mono text-ink-soft uppercase">From Entity</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 font-mono">
-                    {CARDINALITY_OPTIONS.map(opt => {
-                      const isCurrent = (activeEdge.sourceMarker ?? (activeEdge.arrow === 'both' ? 'arrow' : 'none')) === opt.value;
-                      return (
-                        <button
-                          key={`src-${opt.value}`}
-                          type="button"
-                          onClick={() => updateSelectedEdgeSourceMarker(opt.value)}
-                          className={`py-2 px-1.5 border flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                            isCurrent 
-                              ? 'bg-ink text-paper border-ink font-bold shadow-sm' 
-                              : 'bg-paper text-ink border-line hover:border-ink hover:bg-paper-raised'
-                          }`}
-                          title={opt.title}
-                        >
-                          <CrowsFootVisualIcon type={opt.value} isSelected={isCurrent} />
-                          <span className="text-[10px] tracking-tight">{opt.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Granular Target Cardinality (End of connection) */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">
-                      TARGET: {nodes.find(n => n.id === activeEdge.target)?.label || 'END'}
-                    </label>
-                    <span className="text-[9px] font-mono text-ink-soft uppercase">To Entity</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 font-mono">
-                    {CARDINALITY_OPTIONS.map(opt => {
-                      const isCurrent = (activeEdge.targetMarker ?? (activeEdge.arrow === 'none' ? 'none' : 'arrow')) === opt.value;
-                      return (
-                        <button
-                          key={`tgt-${opt.value}`}
-                          type="button"
-                          onClick={() => updateSelectedEdgeTargetMarker(opt.value)}
-                          className={`py-2 px-1.5 border flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                            isCurrent 
-                              ? 'bg-ink text-paper border-ink font-bold shadow-sm' 
-                              : 'bg-paper text-ink border-line hover:border-ink hover:bg-paper-raised'
-                          }`}
-                          title={opt.title}
-                        >
-                          <CrowsFootVisualIcon type={opt.value} isSelected={isCurrent} />
-                          <span className="text-[10px] tracking-tight">{opt.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Edge line style */}
-                <div className="flex flex-col gap-1.5 mt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">LINE_STYLE</label>
-                    <span className="text-[9.5px] font-mono text-ink-soft">Solid (Ident.) / Dashed (Non-ident.)</span>
-                  </div>
-                  <div className="grid grid-cols-2 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedEdgeStyle('solid')}
-                      className={`py-1.5 border-r border-ink hover:bg-paper-raised cursor-pointer ${
-                        activeEdge.style !== 'dashed' ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                      }`}
-                    >
-                      solid
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedEdgeStyle('dashed')}
-                      className={`py-1.5 hover:bg-paper-raised cursor-pointer ${
-                        activeEdge.style === 'dashed' ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                      }`}
-                    >
-                      dashed
-                    </button>
-                  </div>
-                </div>
-
-                {/* Legacy Quick Arrow Presets */}
-                <div className="flex flex-col gap-1.5 mt-1">
-                  <label className="font-mono text-[10px] text-ink-soft font-bold">ARROW_STYLE</label>
-                  <div className="grid grid-cols-3 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedEdgeArrow('end')}
-                      className={`py-1.5 border-r border-ink hover:bg-paper-raised cursor-pointer ${
-                        activeEdge.arrow !== 'none' && activeEdge.arrow !== 'both' && activeEdge.targetMarker === 'arrow' ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                      }`}
-                      title="Single Arrow (→)"
-                    >
-                      arrow →
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedEdgeArrow('none')}
-                      className={`py-1.5 border-r border-ink hover:bg-paper-raised cursor-pointer ${
-                        activeEdge.sourceMarker === 'none' && activeEdge.targetMarker === 'none' ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                      }`}
-                      title="Plain Line (—)"
-                    >
-                      none —
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedEdgeArrow('both')}
-                      className={`py-1.5 hover:bg-paper-raised cursor-pointer ${
-                        activeEdge.arrow === 'both' ? 'bg-ink text-paper font-bold' : 'text-ink-soft'
-                      }`}
-                      title="Both Ends (↔)"
-                    >
-                      both ↔
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={deleteSelectedEdge}
-                  className="w-full py-2 border-2 border-signal text-signal hover:bg-signal hover:text-paper font-mono text-[11px] font-bold cursor-pointer transition-colors mt-2"
-                >
-                  Delete Connector
-                </button>
-              </div>
-            ) : selectedDrawing ? (
-              <div className="flex flex-col gap-4">
-                <div className="font-mono text-[11px] text-ink-soft font-bold border-b border-line pb-1.5 flex items-center justify-between">
-                  <span>DRAWING_PROPERTIES</span>
-                  <span className="text-[9px] text-signal border border-signal px-1 font-mono uppercase">
-                    {selectedDrawing.tool === 'highlighter' ? 'Highlighter' : 'Pen Stroke'}
-                  </span>
-                </div>
-
-                {/* Stroke Color */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-mono text-[10px] text-ink-soft font-bold flex justify-between items-center">
-                    <span>STROKE_COLOR</span>
-                    <span className="text-ink font-mono text-[10px]">{selectedDrawing.color || '#D45B33'}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 grid grid-cols-6 border-2 border-ink bg-paper p-0.5 gap-0.5">
-                      {PENCIL_COLOR_PRESETS.map((p) => (
-                        <button
-                          key={p.value}
-                          type="button"
-                          onClick={() => updateSelectedDrawingColor(p.value)}
-                          className="h-5 rounded-none border border-ink/40 flex items-center justify-center cursor-pointer hover:opacity-80"
-                          style={{ backgroundColor: p.value }}
-                          title={p.label}
-                        />
-                      ))}
-                    </div>
-                    <label className="border-2 border-ink bg-paper p-1 cursor-pointer flex items-center justify-center relative w-7 h-7 shrink-0" title="Custom Stroke Color">
-                      <input
-                        type="color"
-                        value={selectedDrawing.color || '#D45B33'}
-                        onChange={(e) => updateSelectedDrawingColor(e.target.value)}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-3.5 h-3.5 text-blueprint" />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Stroke Thickness */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-mono text-[10px] text-ink-soft font-bold">STROKE_WIDTH</label>
-                    <span className="font-mono text-[10px] text-ink-soft">{selectedDrawing.width || 2}px</span>
-                  </div>
-                  <div className="grid grid-cols-4 border-2 border-ink font-mono text-[11px] text-center bg-paper">
-                    {PENCIL_WIDTH_PRESETS.map((p) => (
-                      <button
-                        key={p.value}
-                        type="button"
-                        onClick={() => updateSelectedDrawingWidth(p.value)}
-                        className={`py-1.5 border-r last:border-r-0 border-ink cursor-pointer ${
-                          (selectedDrawing.width || 2) === p.value ? 'bg-ink text-paper font-bold' : 'text-ink-soft hover:text-ink'
-                        }`}
-                        title={p.label}
-                      >
-                        {p.value}px
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Opacity indicator */}
-                <div className="p-2.5 border border-line bg-paper-raised font-mono text-[10px] text-ink-soft flex flex-col gap-1.5">
-                  <div className="flex justify-between">
-                    <span>Opacity:</span>
-                    <span className="text-ink font-bold">{Math.round((selectedDrawing.opacity ?? 1) * 100)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Drawing ID:</span>
-                    <span className="text-ink font-mono">{selectedDrawing.id}</span>
-                  </div>
-                </div>
-
-                {/* Delete and Deselect Buttons */}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDrawingId(null)}
-                    className="flex-1 py-1.5 px-2 border border-ink bg-paper hover:bg-paper-raised font-mono text-[11px] font-bold text-center cursor-pointer transition-colors"
-                  >
-                    Deselect
-                  </button>
-                  <button
-                    type="button"
-                    onClick={deleteSelectedDrawing}
-                    className="py-1.5 px-3 border border-signal text-signal hover:bg-signal hover:text-paper font-mono text-[11px] font-bold text-center cursor-pointer transition-colors"
-                  >
-                    Delete (Del)
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* Canvas Overview when nothing is selected */
-              <div className="flex flex-col gap-4">
-                <div className="font-mono text-[10px] text-blueprint uppercase tracking-wider font-bold border-b border-line pb-1.5">
-                  Diagram Overview
-                </div>
-
-                {/* Diagram Info Card */}
-                <div className="p-3 border-2 border-ink bg-paper-raised flex flex-col gap-2 font-mono text-[11px]">
-                  <div className="font-bold text-ink truncate">{diagram.title}</div>
-                  <div className="flex justify-between text-ink-soft text-[10px] pt-1 border-t border-line border-dashed">
-                    <span>Notation:</span>
-                    <span className="text-blueprint font-bold uppercase">{diagram.type}</span>
-                  </div>
-                  <div className="flex justify-between text-ink-soft text-[10px]">
-                    <span>Total Shapes:</span>
-                    <span className="text-ink font-bold">{nodes.length}</span>
-                  </div>
-                  <div className="flex justify-between text-ink-soft text-[10px]">
-                    <span>Connections:</span>
-                    <span className="text-ink font-bold">{edges.length}</span>
-                  </div>
-                  {drawings.length > 0 && (
-                    <div className="flex justify-between text-ink-soft text-[10px]">
-                      <span>Drawings:</span>
-                      <span className="text-ink font-bold">{drawings.length} paths</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Canvas Quick Actions */}
-                <div className="flex flex-col gap-2 pt-1">
-                  <div className="font-mono text-[10px] text-ink-soft uppercase tracking-wider font-bold">
-                    Quick Canvas Actions
-                  </div>
-                  <button
-                    type="button"
-                    onClick={autoAlignNodes}
-                    className="w-full py-2 px-3 border border-line hover:border-ink bg-paper text-[11px] font-mono text-ink hover:text-blueprint transition-colors cursor-pointer flex items-center justify-between"
-                  >
-                    <span>Auto-Align Shapes</span>
-                    <Wand2 className="w-3.5 h-3.5 text-blueprint" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResetZoom}
-                    className="w-full py-2 px-3 border border-line hover:border-ink bg-paper text-[11px] font-mono text-ink transition-colors cursor-pointer flex items-center justify-between"
-                  >
-                    <span>Reset View (100%)</span>
-                    <span className="text-[10px] text-ink-soft font-bold">{Math.round(zoom * 100)}%</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClearCanvas}
-                    className="w-full py-2 px-3 border border-line hover:border-signal bg-paper text-[11px] font-mono text-ink-soft hover:text-signal transition-colors cursor-pointer flex items-center justify-between"
-                  >
-                    <span>Clear Canvas</span>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Instruction footnote in right sidebar */}
-            <div className="font-mono text-[10px] text-ink-soft leading-relaxed border-t-2 border-ink pt-3 mt-4">
-              <div className="font-bold text-ink mb-0.5">Shortcuts</div>
-              <div>V: Select / Move • M: Box Select</div>
-              <div>P: Pencil Notes • H: Hand Grab</div>
-              <div>Ctrl+Z: Undo • Delete: Remove</div>
-            </div>
-          </div>
-        </aside>
+        <PropertiesSidebar
+          isRightSidebarOpen={isRightSidebarOpen}
+          setIsRightSidebarOpen={setIsRightSidebarOpen}
+          diagram={diagram}
+          nodes={nodes}
+          edges={edges}
+          drawings={drawings}
+          selectedNodeIds={selectedNodeIds}
+          selectedEdgeId={selectedEdgeId}
+          selectedDrawingId={selectedDrawingId}
+          zoom={zoom}
+          setSelectedDrawingId={setSelectedDrawingId}
+          duplicateSelection={duplicateSelection}
+          deleteSelectedNodes={deleteSelectedNodes}
+          deleteSelectedEdge={deleteSelectedEdge}
+          deleteSelectedDrawing={deleteSelectedDrawing}
+          morphSelectedNodeType={morphSelectedNodeType}
+          updateSelectedNodeLabel={updateSelectedNodeLabel}
+          updateSelectedNodeFields={updateSelectedNodeFields}
+          updateSelectedNodeProperties={updateSelectedNodeProperties}
+          updateSelectedNodeProperty={updateSelectedNodeProperty}
+          bringToFront={bringToFront}
+          bringForward={bringForward}
+          sendBackward={sendBackward}
+          sendToBack={sendToBack}
+          updateSelectedEdgeLabel={updateSelectedEdgeLabel}
+          updateSelectedEdgeStyle={updateSelectedEdgeStyle}
+          updateSelectedEdgeArrow={updateSelectedEdgeArrow}
+          updateSelectedEdgeSourceMarker={updateSelectedEdgeSourceMarker}
+          updateSelectedEdgeTargetMarker={updateSelectedEdgeTargetMarker}
+          updateSelectedEdgeErdPreset={updateSelectedEdgeErdPreset}
+          resetSelectedEdgeRoute={resetSelectedEdgeRoute}
+          updateSelectedDrawingColor={updateSelectedDrawingColor}
+          updateSelectedDrawingWidth={updateSelectedDrawingWidth}
+          autoAlignNodes={autoAlignNodes}
+          handleResetZoom={handleResetZoom}
+          handleClearCanvas={handleClearCanvas}
+        />
       </div>
 
       {/* Overhauled Export Suite Modal */}

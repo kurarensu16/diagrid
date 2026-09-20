@@ -17,8 +17,26 @@ export const DashboardLayout: React.FC = () => {
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const [isSupportEnabled, setIsSupportEnabled] = useState(false);
-  const [githubUrl, setGithubUrl] = useState('https://github.com/kurarensu16/diagrid');
+  const [isSupportEnabled, setIsSupportEnabled] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('diagrid_platform_settings');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return parsed.creator_wallets_enabled !== false;
+      }
+    } catch {}
+    return true; // Default to enabled so button never flickers on load
+  });
+  const [githubUrl, setGithubUrl] = useState(() => {
+    try {
+      const cached = localStorage.getItem('diagrid_platform_settings');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.github_repo_url) return parsed.github_repo_url;
+      }
+    } catch {}
+    return 'https://github.com/kurarensu16/diagrid';
+  });
 
   useEffect(() => {
     adminService.getSystemSettings().then((s) => {
@@ -53,18 +71,6 @@ export const DashboardLayout: React.FC = () => {
         </Link>
         
         <div className="flex items-center gap-2 sm:gap-3 font-mono text-[12px] text-ink-soft">
-          {/* Support Creator Pill (Red Theme) */}
-          {isSupportEnabled && (
-            <button
-              onClick={() => setIsSupportOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 border border-rose-500/50 hover:border-rose-600 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold transition-all cursor-pointer"
-              title="Support Diagrid Creator & Unlock Perks"
-            >
-              <Heart className="w-3.5 h-3.5 text-rose-600 fill-rose-600" />
-              <span>support_creator()</span>
-            </button>
-          )}
-
           {user ? (
             <Link
               to="/settings"
