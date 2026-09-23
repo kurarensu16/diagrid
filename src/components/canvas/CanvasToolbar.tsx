@@ -269,7 +269,10 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       </div>
 
       {/* Canvas Floating Zoom & Grid controls */}
-      <div className="absolute top-4 right-4 z-10 flex border border-line bg-paper-raised shadow-hard-ink font-mono text-[11px] select-none">
+      <div
+        className="absolute top-4 right-4 z-40 flex border border-line bg-paper-raised shadow-hard-ink font-mono text-[11px] select-none"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         {/* Grid Pattern Selector */}
         <button
           onClick={onToggleGridStyle}

@@ -4,6 +4,13 @@ export interface CodeToDiagramResult {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   warning?: string;
+  diagnostics: CodeDiagnostic[];
+}
+
+export interface CodeDiagnostic {
+  line: number;
+  message: string;
+  source: string;
 }
 
 export type LayoutDirection = 'LR' | 'TD';
@@ -209,18 +216,21 @@ export const parseCodeToDiagram = (
   startOffset: { x: number; y: number } = { x: 80, y: 80 }
 ): CodeToDiagramResult => {
   const rawLines = rawCode.split('\n');
-  const lines = rawLines
-    .map(l => l.trim())
-    .filter(l => l.length > 0 && !l.startsWith('%%') && !l.startsWith('//'));
+  const entries = rawLines
+    .map((raw, index) => ({ text: raw.trim(), line: index + 1 }))
+    .filter(({ text }) => text.length > 0 && !text.startsWith('%%') && !text.startsWith('//'));
+  const lines = entries.map(({ text }) => text);
+  const diagnostics: CodeDiagnostic[] = [];
 
   if (lines.length === 0) {
-    return { nodes: [], edges: [] };
+    return { nodes: [], edges: [], diagnostics };
   }
 
   // Detect Diagram Header & Direction
   let effectiveDir = direction;
 
   const firstLine = lines[0].toLowerCase();
+  const isSequenceDiagram = firstLine.startsWith('sequencediagram');
   if (firstLine.startsWith('flowchart') || firstLine.startsWith('graph')) {
     if (firstLine.includes('td') || firstLine.includes('tb')) effectiveDir = 'TD';
     if (firstLine.includes('lr') || firstLine.includes('rl')) effectiveDir = 'LR';
@@ -230,7 +240,7 @@ export const parseCodeToDiagram = (
   const edges: ParsedEdgeInfo[] = [];
 
   // Helper to ensure node exists or register it
-  const ensureNode = (id: string, label?: string, type: CanvasNode['type'] = 'process', fields?: string[]) => {
+  const ensureNode = (id: string, label?: string, type: CanvasNode['type'] = 'process', fields?: string[], explicit = false) => {
     const cleanId = id.trim();
     if (!cleanId) return;
     if (!nodeMap.has(cleanId)) {
@@ -242,7 +252,7 @@ export const parseCodeToDiagram = (
       });
     } else {
       const existing = nodeMap.get(cleanId)!;
-      if (label && (existing.label === cleanId || label !== existing.label)) {
+      if (label && (explicit || (existing.label === cleanId && label !== cleanId))) {
         existing.label = stripQuotes(label);
         existing.type = type;
       }
@@ -349,6 +359,17 @@ export const parseCodeToDiagram = (
       currentTableShorthand = null;
     }
 
+    // Table shorthand references use the table IDs already created above.
+    const tableRelMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*-->\s*([a-zA-Z0-9_.-]+)\s*:\s*(.+)$/);
+    if (tableRelMatch) {
+      const source = `tbl-${tableRelMatch[1].toLowerCase()}`;
+      const target = `tbl-${tableRelMatch[2].toLowerCase()}`;
+      if (nodeMap.has(source) && nodeMap.has(target)) {
+        edges.push({ source, target, label: tableRelMatch[3].trim(), style: 'solid' });
+        continue;
+      }
+    }
+
     // --- 3. Mermaid erDiagram Relationship: ENTITY1 ||--o{ ENTITY2 : "places" ---
     const erRelMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*([|o}{.-]+)\s*([a-zA-Z0-9_.-]+)\s*:\s*(?:["'](.*?)["']|(.*?))$/i);
     if (erRelMatch) {
@@ -373,7 +394,7 @@ export const parseCodeToDiagram = (
     }
 
     // --- 4. Sequence Diagram Statements: A->>B: Message or A-->>B: Reply ---
-    const seqMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*(-+>>?|--+>>?)\s*([a-zA-Z0-9_.-]+)\s*:\s*(.*)$/i);
+    const seqMatch = isSequenceDiagram ? line.match(/^(.+?)\s*(--?>>?)\s*(.+?)\s*:\s*(.*)$/i) : null;
     if (seqMatch) {
       const src = parseNodeToken(seqMatch[1]);
       const arrowSymbol = seqMatch[2];
@@ -431,7 +452,7 @@ export const parseCodeToDiagram = (
           // It's a node or multiple nodes joined by '&'
           const nodeTokens = part.split('&').map(t => parseNodeToken(t.trim()));
           nodeTokens.forEach(n => {
-            ensureNode(n.id, n.label, n.type);
+            ensureNode(n.id, n.label, n.type, undefined, n.label !== n.id || n.type !== 'process');
             if (currentSubgraph) {
               const nodeObj = nodeMap.get(n.id);
               if (nodeObj) nodeObj.subgraph = currentSubgraph;
@@ -489,19 +510,25 @@ export const parseCodeToDiagram = (
     }
 
     // --- 6. Standalone Node Definition: A[Start Step] or A((Start)) or A{Check} ---
-    if (/^[a-zA-Z0-9_.-]+\s*(\[|\(|\{|\>)/.test(line)) {
+    if (/^[a-zA-Z0-9_.-]+\s*(\[|\(|\{|>)/.test(line)) {
       const parsed = parseNodeToken(line);
-      ensureNode(parsed.id, parsed.label, parsed.type);
+      ensureNode(parsed.id, parsed.label, parsed.type, undefined, true);
       if (currentSubgraph) {
         const nodeObj = nodeMap.get(parsed.id);
         if (nodeObj) nodeObj.subgraph = currentSubgraph;
       }
       continue;
     }
+
+    diagnostics.push({
+      line: entries[i].line,
+      message: 'Unsupported or unrecognized statement',
+      source: line,
+    });
   }
 
   if (nodeMap.size === 0) {
-    return { nodes: [], edges: [] };
+    return { nodes: [], edges: [], diagnostics };
   }
 
   // --- Automatic Hierarchical DAG Layout Algorithm ---
@@ -573,42 +600,82 @@ export const parseCodeToDiagram = (
 
   const sortedRanks = Array.from(layers.keys()).sort((a, b) => a - b);
 
-  // Position Dimensions
-  const ROW_GAP = isHorizontal ? 100 : 130;
-  const COL_GAP = isHorizontal ? 220 : 180;
+  // Position dimensions. Layout spacing must account for the actual node size;
+  // a fixed row gap makes ERD tables (which can be much taller than process
+  // nodes) overlap as soon as a schema contains a few fields.
+  const ROW_GAP = isHorizontal ? 80 : 100;
+  const COL_GAP = isHorizontal ? 140 : 120;
+
+  const getParsedNodeDimensions = (parsed: ParsedNodeInfo) => {
+    const isTable = parsed.type === 'table';
+    const isDecision = parsed.type === 'decision';
+    return {
+      width: isTable ? 180 : isDecision ? 100 : 140,
+      height: isTable ? Math.max(48, 32 + (parsed.fields?.length || 0) * 24) : isDecision ? 100 : 48
+    };
+  };
+
+  const layerDimensions = new Map<number, { primary: number; cross: number }>();
+  sortedRanks.forEach(rank => {
+    const layerNodeIds = layers.get(rank)!;
+    const dimensions = layerNodeIds.map(id => getParsedNodeDimensions(nodeMap.get(id)!));
+    layerDimensions.set(rank, {
+      // In LR, primary is width and cross is height. In TD these are reversed.
+      primary: Math.max(...dimensions.map(d => isHorizontal ? d.width : d.height)),
+      cross: dimensions.reduce((sum, d) => sum + (isHorizontal ? d.height : d.width), 0) + Math.max(0, dimensions.length - 1) * ROW_GAP
+    });
+  });
+
+  // Put connected nodes near the average position of their neighbors. This
+  // substantially reduces diagonal and crossing connectors in branching flows.
+  const nodeOrder = new Map<string, number>();
+  sortedRanks.forEach(rank => {
+    const layerNodeIds = layers.get(rank)!;
+    const previousOrder = new Map(nodeOrder);
+    layerNodeIds.sort((a, b) => {
+      const neighborPosition = (id: string) => {
+        const neighbors = (inEdges.get(id) || []).concat(outEdges.get(id) || []);
+        const positions = neighbors.map(neighbor => previousOrder.get(neighbor)).filter((value): value is number => value !== undefined);
+        return positions.length ? positions.reduce((sum, value) => sum + value, 0) / positions.length : Number.POSITIVE_INFINITY;
+      };
+      const difference = neighborPosition(a) - neighborPosition(b);
+      return difference || nodeIds.indexOf(a) - nodeIds.indexOf(b);
+    });
+    layerNodeIds.forEach((id, index) => nodeOrder.set(id, index));
+  });
+
+  // Calculate each layer's absolute primary-axis position from its content,
+  // instead of assuming every node has the same width/height.
+  const primaryPositions = new Map<number, number>();
+  let primaryPosition = isHorizontal ? startOffset.x : startOffset.y;
+  sortedRanks.forEach(rank => {
+    primaryPositions.set(rank, primaryPosition);
+    primaryPosition += layerDimensions.get(rank)!.primary + COL_GAP;
+  });
+
+  const maxCross = Math.max(...sortedRanks.map(rank => layerDimensions.get(rank)!.cross));
 
   const finalNodes: CanvasNode[] = [];
   const idMap = new Map<string, string>(); // maps parsed ID to generated canvas node UUID
 
   sortedRanks.forEach(rank => {
     const layerNodeIds = layers.get(rank)!;
-    const layerCount = layerNodeIds.length;
+    const layerCross = layerDimensions.get(rank)!.cross;
+    let crossPosition = (maxCross - layerCross) / 2;
 
-    layerNodeIds.forEach((id, idx) => {
+    layerNodeIds.forEach((id) => {
       const parsed = nodeMap.get(id)!;
       const newUuid = `node-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
       idMap.set(id, newUuid);
 
-      // Centered offset within the layer
-      const layerOffset = (idx - (layerCount - 1) / 2) * ROW_GAP;
+      const dimensions = getParsedNodeDimensions(parsed);
 
-      let x = 0;
-      let y = 0;
+      let x = isHorizontal ? primaryPositions.get(rank)! : startOffset.x + crossPosition;
+      let y = isHorizontal ? startOffset.y + crossPosition : primaryPositions.get(rank)!;
 
-      if (isHorizontal) {
-        x = startOffset.x + rank * COL_GAP;
-        y = startOffset.y + 160 + layerOffset;
-      } else {
-        x = startOffset.x + 220 + layerOffset;
-        y = startOffset.y + rank * COL_GAP;
-      }
-
-      // Snap to 20px blueprint grid
+      // Snap to 20px blueprint grid after dimension-aware placement.
       x = Math.max(40, Math.round(x / 20) * 20);
       y = Math.max(40, Math.round(y / 20) * 20);
-
-      const isTable = parsed.type === 'table';
-      const isDecision = parsed.type === 'decision';
 
       const canvasNode: CanvasNode = {
         id: newUuid,
@@ -617,11 +684,12 @@ export const parseCodeToDiagram = (
         x,
         y,
         fields: parsed.fields,
-        width: isTable ? 180 : isDecision ? 100 : 140,
-        height: isTable ? Math.max(48, 32 + (parsed.fields?.length || 0) * 24) : isDecision ? 100 : 48
+        width: dimensions.width,
+        height: dimensions.height
       };
 
       finalNodes.push(canvasNode);
+      crossPosition += (isHorizontal ? dimensions.height : dimensions.width) + ROW_GAP;
     });
   });
 
@@ -715,7 +783,8 @@ export const parseCodeToDiagram = (
 
   return {
     nodes: finalNodes,
-    edges: finalEdges
+    edges: finalEdges,
+    diagnostics,
   };
 };
 
@@ -739,10 +808,20 @@ export const diagramToMermaid = (
 
   if (isEr && tableNodes.length > 0) {
     const lines: string[] = ['erDiagram'];
+    const entityNames = new Map<string, string>();
+    const usedEntityNames = new Set<string>();
+    tableNodes.forEach((node, index) => {
+      const base = (node.label || 'Table').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]+/, '') || `Table_${index + 1}`;
+      let name = base;
+      let suffix = 2;
+      while (usedEntityNames.has(name)) name = `${base}_${suffix++}`;
+      usedEntityNames.add(name);
+      entityNames.set(node.id, name);
+    });
 
     // 1. Entities & Fields
     tableNodes.forEach(node => {
-      const cleanEntityName = (node.label || 'Table').replace(/[^a-zA-Z0-9_]/g, '_');
+      const cleanEntityName = entityNames.get(node.id)!;
       lines.push(`    ${cleanEntityName} {`);
       if (node.fields && node.fields.length > 0) {
         node.fields.forEach(field => {
@@ -776,9 +855,9 @@ export const diagramToMermaid = (
     edges.forEach(edge => {
       const src = nodes.find(n => n.id === edge.source);
       const tgt = nodes.find(n => n.id === edge.target);
-      if (src && tgt) {
-        const srcName = (src.label || 'Entity1').replace(/[^a-zA-Z0-9_]/g, '_');
-        const tgtName = (tgt.label || 'Entity2').replace(/[^a-zA-Z0-9_]/g, '_');
+      if (src && tgt && entityNames.has(src.id) && entityNames.has(tgt.id)) {
+        const srcName = entityNames.get(src.id)!;
+        const tgtName = entityNames.get(tgt.id)!;
         const relLabel = edge.label ? ` : "${edge.label}"` : ' : references';
         const lineStyle = edge.style === 'dashed' ? '..' : '--';
         const leftToken = markerToMermaidToken(edge.sourceMarker, true);
@@ -824,11 +903,14 @@ export const diagramToMermaid = (
 
   // Map each node ID to a clean alias e.g. A, B, C, N1, N2...
   const aliasMap = new Map<string, string>();
+  const usedAliases = new Set<string>();
   nodes.forEach((node, idx) => {
     let cleanAlias = node.label.replace(/[^a-zA-Z0-9]/g, '');
-    if (!cleanAlias || cleanAlias.length > 8 || aliasMap.has(cleanAlias)) {
+    if (!/^[a-zA-Z]/.test(cleanAlias) || cleanAlias.length > 8 || usedAliases.has(cleanAlias)) {
       cleanAlias = `Node${idx + 1}`;
     }
+    while (usedAliases.has(cleanAlias)) cleanAlias = `Node${idx + 1}_${usedAliases.size}`;
+    usedAliases.add(cleanAlias);
     aliasMap.set(node.id, cleanAlias);
   });
 

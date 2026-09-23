@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useRef } from 'react';
 import type { CanvasNode, CanvasEdge } from '../../services/mockDb';
 import { dc, getMarkerUrl, getNodeDimensions } from '../../types/canvas';
 import {
@@ -27,6 +27,8 @@ export interface EdgeLayerProps {
   } | null;
   tempEdgeEnd: { x: number; y: number };
   diagramType?: string;
+  isRoutingDeferred?: boolean;
+  routingRevision?: number;
   onSelectEdge: (id: string) => void;
   handleEdgeReconnectStart: (
     e: React.MouseEvent,
@@ -53,11 +55,80 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
   snappedPort,
   tempEdgeEnd,
   diagramType,
+  isRoutingDeferred = false,
+  routingRevision = 0,
   onSelectEdge,
   handleEdgeReconnectStart,
   handleEdgeRouteDragStart,
   resetSelectedEdgeRoute,
 }) => {
+  const routeCacheRef = useRef(new Map<string, {
+    signature: string;
+    endpointSignature: string;
+    path: string;
+    pathPoints: { x: number; y: number }[];
+    labelPosition: { x: number; y: number };
+  }>());
+
+  const edgeRoutes = useMemo(() => {
+    const nodesById = new Map(nodes.map((node) => [node.id, node]));
+    // Outside an active geometry interaction every node is part of the route
+    // signature, so obstacle-aware paths stay correct. During a drag/resize we
+    // intentionally omit unrelated obstacles: only edges whose endpoint moves
+    // are recalculated, then all paths are refreshed on mouse-up.
+    const obstacleSignature = isRoutingDeferred
+      ? `deferred:${routingRevision}`
+      : nodes.map((node) => `${node.id}:${node.x}:${node.y}:${node.customWidth ?? ''}:${node.customHeight ?? ''}`).join('|');
+    const routes = new Map<string, {
+      path: string;
+      pathPoints: { x: number; y: number }[];
+      labelPosition: { x: number; y: number };
+    }>();
+
+    for (const edge of edges) {
+      const source = nodesById.get(edge.source);
+      const target = nodesById.get(edge.target);
+      if (!source || !target) continue;
+      const signature = [
+        obstacleSignature,
+        edge.sourceHandle,
+        edge.targetHandle,
+        edge.routeMode,
+        edge.waypoints ? JSON.stringify(edge.waypoints) : '',
+        source.x, source.y, source.customWidth ?? '', source.customHeight ?? '',
+        target.x, target.y, target.customWidth ?? '', target.customHeight ?? '',
+      ].join(';');
+      const endpointSignature = [
+        edge.sourceHandle,
+        edge.targetHandle,
+        edge.routeMode,
+        edge.waypoints ? JSON.stringify(edge.waypoints) : '',
+        source.x, source.y, source.customWidth ?? '', source.customHeight ?? '',
+        target.x, target.y, target.customWidth ?? '', target.customHeight ?? '',
+      ].join(';');
+      const cached = routeCacheRef.current.get(edge.id);
+      if (cached && (cached.signature === signature || (isRoutingDeferred && cached.endpointSignature === endpointSignature))) {
+        routes.set(edge.id, cached);
+        continue;
+      }
+
+      const path = calculateEdgePath(edge, nodes, nodesById, {
+        skipSearch: isRoutingDeferred || nodes.length > 30,
+      });
+      if (!path) continue;
+      const route = {
+        signature,
+        endpointSignature,
+        path,
+        pathPoints: getEdgePathPoints(path),
+        labelPosition: getEdgeLabelPosition(path),
+      };
+      routeCacheRef.current.set(edge.id, route);
+      routes.set(edge.id, route);
+    }
+    return routes;
+  }, [edges, nodes, isRoutingDeferred, routingRevision]);
+
   return (
     <>
       <defs>
@@ -279,15 +350,15 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
       {/* Render connector edges */}
       {edges.map((edge) => {
         const isSelected = selectedEdgeId === edge.id;
-        const path = calculateEdgePath(edge, nodes);
-        if (!path) return null;
-        const pathPoints = getEdgePathPoints(path);
+        const route = edgeRoutes.get(edge.id);
+        if (!route) return null;
+        const { path, pathPoints } = route;
 
-        const { x: labelX, y: routeLabelY } = getEdgeLabelPosition(path);
+        const { x: labelX, y: routeLabelY } = route.labelPosition;
         const labelY = routeLabelY - 8;
 
         return (
-          <g key={edge.id} className="cursor-pointer">
+          <g key={edge.id} data-canvas-edge-id={edge.id} className="cursor-pointer">
             <path
               d={path}
               fill="none"

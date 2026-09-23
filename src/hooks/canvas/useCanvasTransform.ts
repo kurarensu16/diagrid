@@ -381,6 +381,7 @@ export const useCanvasTransform = ({
     setIsScrollbarDragging,
     contentBounds,
     scrollbarMetrics,
+    viewportSize,
     centerDiagramInView,
     handleZoomIn,
     handleZoomOut,

@@ -22,16 +22,19 @@ import {
   dc,
 } from '../types/canvas';
 import { calculateEdgePath } from '../utils/edgeRouting';
+import { CanvasSpatialIndex } from '../utils/spatialIndex';
 import { FreehandLayer } from '../components/canvas/FreehandLayer';
 import { EdgeLayer } from '../components/canvas/EdgeLayer';
 import { PropertiesSidebar } from '../components/canvas/PropertiesSidebar';
 import { CanvasToolbar } from '../components/canvas/CanvasToolbar';
 import { Minimap } from '../components/canvas/Minimap';
+import { StaticNodeCanvasLayer } from '../components/canvas/StaticNodeCanvasLayer';
+import { CodeImportPreview } from '../components/canvas/CodeImportPreview';
 import { useCanvasHistory, type CanvasSnapshot } from '../hooks/canvas/useCanvasHistory';
 import { useCanvasSelection } from '../hooks/canvas/useCanvasSelection';
 import { useCanvasTransform } from '../hooks/canvas/useCanvasTransform';
 import { useEdgeInteractions, getClosestPortOnNode } from '../hooks/canvas/useEdgeInteractions';
-import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type LayoutDirection } from '../utils/codeToDiagram';
+import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type CodeToDiagramResult, type LayoutDirection } from '../utils/codeToDiagram';
 import { 
   Plus,
   Sliders,
@@ -81,6 +84,57 @@ const getToolIcon = (type: CanvasNode['type']): React.ReactNode => {
   }
 };
 
+// ERD cards contain the deepest DOM tree in the canvas. Their node object is
+// reference-stable when another shape moves, so memoizing this subtree avoids
+// repeatedly rebuilding every field row during unrelated interactions.
+const TableNodeContent = React.memo(({ node }: { node: CanvasNode }) => {
+  const effectiveFontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
+  const textStyleObj: React.CSSProperties = { fontSize: `${effectiveFontSize}px` };
+
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
+      <div
+        className="py-1.5 px-3 border-b-2 border-ink font-mono font-bold text-white uppercase select-none truncate text-center tracking-wider shrink-0"
+        style={{
+          backgroundColor: (node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#'))
+            ? node.shadowAccent
+            : '#1E5C8C',
+          ...textStyleObj,
+        }}
+      >
+        {node.label}
+      </div>
+      <div className="flex-1 p-2.5 flex flex-col gap-1.5 select-none font-mono text-[11px]">
+        {(node.fields || []).map((field, index) => {
+          const parts = field.split(' ');
+          const fieldName = parts[0] || '';
+          const fieldType = parts.slice(1).join(' ') || '';
+          const isPk = field.toLowerCase().includes('pk');
+          const isFk = field.toLowerCase().includes('fk');
+          const rawType = fieldType.replace(/\b(pk|fk)\b/gi, '').trim();
+          return (
+            <div key={index} className="flex justify-between items-center gap-2 border-b border-dashed border-line last:border-0 pb-1">
+              <span className="text-ink font-bold truncate">{fieldName}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {rawType && <span className="text-ink-soft text-[10px]">{rawType}</span>}
+                {isPk && <span className="px-1 py-0.5 text-[8px] font-bold bg-blueprint text-white rounded-[2px] leading-none uppercase">PK</span>}
+                {isFk && <span className="px-1 py-0.5 text-[8px] font-bold border border-blueprint text-blueprint rounded-[2px] leading-none uppercase">FK</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+// Complex notation-specific cards keep their legacy DOM implementation until
+// their Canvas equivalents reach feature parity.
+const CANVAS_RENDERABLE_TYPES = new Set<CanvasNode['type']>([
+  'table', 'process', 'decision', 'terminal', 'text', 'usecase-oval',
+  'activity-start', 'activity-end', 'activity-action', 'activity-decision', 'activity-fork',
+]);
+
 export const Editor: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -114,8 +168,24 @@ export const Editor: React.FC = () => {
   // Dragging states (Figma-inspired click vs drag handling)
   const DRAG_THRESHOLD = 4; // px distance threshold before drag begins
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [routingRevision, setRoutingRevision] = useState(0);
+  // Secondary views do not need to reflect every intermediate drag coordinate.
+  // Keeping a settled model prevents autosave, Mermaid export, the minimap,
+  // and scrollbar bounds from doing full-document work on each animation frame.
+  const [settledNodes, setSettledNodes] = useState<CanvasNode[]>(nodes);
+  const isGeometryInteraction = draggedNodeId !== null || isResizing;
 
   const nodeDragStateRef = useRef<NodeDragState | null>(null);
+  const dragPreviewDeltaRef = useRef<{ x: number; y: number } | null>(null);
+  const dragPreviewEdgePathsRef = useRef(new Map<SVGPathElement, string>());
+  const dragMoveFrameRef = useRef<number | null>(null);
+  const pendingDragClientRef = useRef<{ x: number; y: number } | null>(null);
+  // Pointer events can arrive much faster than the screen refreshes. Keep the
+  // model current for hit testing, but commit visual updates no more than once
+  // per animation frame.
+  const pendingNodeRenderRef = useRef<CanvasNode[] | null>(null);
+  const nodeRenderFrameRef = useRef<number | null>(null);
   const nodesRef = useRef(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
@@ -133,6 +203,65 @@ export const Editor: React.FC = () => {
   const resizeStateRef = useRef<ResizeState | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const alignmentGuideRefs = useRef<(SVGLineElement | null)[]>([]);
+
+  const paintAlignmentGuides = useCallback((guides: { x1: number; y1: number; x2: number; y2: number }[]) => {
+    alignmentGuideRefs.current.forEach((line, index) => {
+      if (!line) return;
+      const guide = guides[index];
+      if (!guide) {
+        line.style.display = 'none';
+        return;
+      }
+      line.setAttribute('x1', String(guide.x1));
+      line.setAttribute('y1', String(guide.y1));
+      line.setAttribute('x2', String(guide.x2));
+      line.setAttribute('y2', String(guide.y2));
+      line.style.display = '';
+    });
+  }, []);
+
+  const clearNodeDragPreview = useCallback((restoreEdges = false) => {
+    if (!canvasRef.current) return;
+    for (const element of canvasRef.current.querySelectorAll<HTMLElement>('[data-canvas-node-id]')) {
+      element.style.transform = '';
+    }
+    if (restoreEdges) {
+      for (const [segment, path] of dragPreviewEdgePathsRef.current) segment.setAttribute('d', path);
+    }
+    dragPreviewEdgePathsRef.current.clear();
+    dragPreviewDeltaRef.current = null;
+  }, []);
+
+  const flushPendingNodeRender = useCallback(() => {
+    if (nodeRenderFrameRef.current !== null) {
+      cancelAnimationFrame(nodeRenderFrameRef.current);
+      nodeRenderFrameRef.current = null;
+    }
+    const pendingNodes = pendingNodeRenderRef.current;
+    pendingNodeRenderRef.current = null;
+    if (pendingNodes) setNodes(pendingNodes);
+  }, []);
+
+  const scheduleNodeRender = useCallback((nextNodes: CanvasNode[]) => {
+    pendingNodeRenderRef.current = nextNodes;
+    if (nodeRenderFrameRef.current !== null) return;
+    nodeRenderFrameRef.current = requestAnimationFrame(() => {
+      nodeRenderFrameRef.current = null;
+      const pendingNodes = pendingNodeRenderRef.current;
+      pendingNodeRenderRef.current = null;
+      if (pendingNodes) setNodes(pendingNodes);
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (nodeRenderFrameRef.current !== null) cancelAnimationFrame(nodeRenderFrameRef.current);
+    if (dragMoveFrameRef.current !== null) cancelAnimationFrame(dragMoveFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!isGeometryInteraction) setSettledNodes(nodes);
+  }, [nodes, isGeometryInteraction]);
 
   const {
     zoom,
@@ -144,6 +273,7 @@ export const Editor: React.FC = () => {
     scrollbarDragRef,
     isScrollbarDragging,
     scrollbarMetrics,
+    viewportSize,
     centerDiagramInView,
     handleZoomIn,
     handleZoomOut,
@@ -155,7 +285,7 @@ export const Editor: React.FC = () => {
     handleCanvasWheel,
   } = useCanvasTransform({
     canvasRef,
-    nodes,
+    nodes: settledNodes,
     drawings,
     nodesRef,
     drawingsRef,
@@ -190,6 +320,14 @@ export const Editor: React.FC = () => {
   const [codeDirection, setCodeDirection] = useState<LayoutDirection>('LR');
   const [codeMode, setCodeMode] = useState<'replace' | 'append'>('replace');
   const [codeStatus, setCodeStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [codePreview, setCodePreview] = useState<{
+    source: string;
+    direction: LayoutDirection;
+    mode: 'replace' | 'append';
+    result: CodeToDiagramResult;
+  } | null>(null);
+
+  useEffect(() => { setCodePreview(null); }, [codeText, codeDirection, codeMode]);
 
   // Filter presets to strictly show only the preset for the chosen diagram template (e.g. ERD preset for ERD, Flowchart preset for Flowchart)
   const templatePresets = useMemo(() => {
@@ -205,8 +343,8 @@ export const Editor: React.FC = () => {
 
   // Generate live Mermaid representation from canvas
   const generatedMermaidCode = useMemo(() => {
-    return diagramToMermaid(nodes, edges, exportMermaidDirection, exportMermaidFormat === 'er');
-  }, [nodes, edges, exportMermaidDirection, exportMermaidFormat]);
+    return diagramToMermaid(settledNodes, edges, exportMermaidDirection, exportMermaidFormat === 'er');
+  }, [settledNodes, edges, exportMermaidDirection, exportMermaidFormat]);
 
   const handleCopyMermaidCode = async () => {
     try {
@@ -237,31 +375,38 @@ export const Editor: React.FC = () => {
       const startOffset = codeMode === 'append' ? { x: 80 + nodes.length * 30, y: 80 + nodes.length * 30 } : { x: 80, y: 80 };
       const result = parseCodeToDiagram(codeText, codeDirection, startOffset);
       if (result.nodes.length === 0) {
-        setCodeStatus({ type: 'error', message: 'No valid shapes found in code.' });
+        const detail = result.diagnostics[0];
+        setCodeStatus({ type: 'error', message: detail ? `No valid shapes found. Line ${detail.line}: ${detail.message}.` : 'No valid shapes found in code.' });
+        setCodePreview(null);
         return;
       }
-
-      let nextNodes = result.nodes;
-      let nextEdges = result.edges;
-
-      if (codeMode === 'append') {
-        nextNodes = [...nodes, ...result.nodes];
-        nextEdges = [...edges, ...result.edges];
-      }
-
-      setNodes(nextNodes);
-      setEdges(nextEdges);
-      setSelectedNodeIds([]);
-      setSelectedEdgeId(null);
-      saveHistoryState(nextNodes, nextEdges, drawings);
-      setCodeStatus({
-        type: 'success',
-        message: `Generated ${result.nodes.length} shapes & ${result.edges.length} connections!`
-      });
-      setTimeout(() => setCodeStatus(null), 4000);
+      setCodeStatus(null);
+      setCodePreview({ source: codeText, direction: codeDirection, mode: codeMode, result });
     } catch (err: any) {
       setCodeStatus({ type: 'error', message: err?.message || 'Failed to parse code.' });
     }
+  };
+
+  const handleApplyCodePreview = () => {
+    if (!codePreview) return;
+    if (codePreview.source !== codeText || codePreview.direction !== codeDirection || codePreview.mode !== codeMode) {
+      setCodePreview(null);
+      setCodeStatus({ type: 'error', message: 'Code or settings changed. Generate a new preview before applying.' });
+      return;
+    }
+    const { result, mode } = codePreview;
+    const nextNodes = mode === 'append' ? [...nodes, ...result.nodes] : result.nodes;
+    const nextEdges = mode === 'append' ? [...edges, ...result.edges] : result.edges;
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelectedNodeIds([]);
+    setSelectedEdgeId(null);
+    saveHistoryState(nextNodes, nextEdges, drawings);
+    setCodePreview(null);
+    setCodeStatus({
+      type: 'success',
+      message: `Generated ${result.nodes.length} shapes & ${result.edges.length} connections${result.diagnostics.length ? `; skipped ${result.diagnostics.length} lines` : ''}.`
+    });
   };
 
   // Clear all canvas contents
@@ -327,9 +472,6 @@ export const Editor: React.FC = () => {
     setIsSnapToGrid(nextSnap);
     authService.updateProfile({ snapToGrid: nextSnap }).catch(() => {});
   };
-
-  // Magnetic alignment guide lines during node drag
-  const [alignmentGuides, setAlignmentGuides] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([]);
 
   // Save status
   const [saveStatus, setSaveStatus] = useState<'ready' | 'saving' | 'cloud-saved' | 'local-only' | 'cloud-failed' | 'failed'>('ready');
@@ -440,6 +582,62 @@ export const Editor: React.FC = () => {
     activeMode,
     selectedEdgeId,
   });
+
+  const spatialIndex = useMemo(() => new CanvasSpatialIndex(nodes), [nodes]);
+  // The legacy card DOM becomes noticeably expensive well before hundreds of
+  // rich table shapes. Switch early enough to protect typical ERDs too.
+  const isCanvasSceneActive = nodes.length >= 30;
+
+  // Keep a generous overscan area to prevent objects popping in during a pan,
+  // while avoiding thousands of off-screen DOM/SVG elements in large diagrams.
+  const { visibleNodes, visibleEdges } = useMemo(() => {
+    const margin = 320;
+    const minX = -pan.x / zoom - margin;
+    const maxX = (viewportSize.width - pan.x) / zoom + margin;
+    const minY = -pan.y / zoom - margin;
+    const maxY = (viewportSize.height - pan.y) / zoom + margin;
+    const visibleNodeIds = new Set(
+      spatialIndex.query({ minX, minY, maxX, maxY }).map((node) => node.id)
+    );
+    for (const id of selectedNodeIds) visibleNodeIds.add(id);
+    if (draggedNodeId) visibleNodeIds.add(draggedNodeId);
+    if (connectingPort?.nodeId) visibleNodeIds.add(connectingPort.nodeId);
+
+    return {
+      visibleNodes: nodes.filter((node) => visibleNodeIds.has(node.id)),
+      // A connector is useful when either endpoint is visible. Selected edges
+      // remain available even when their nodes are outside the viewport.
+      visibleEdges: edges.filter(
+        (edge) =>
+          visibleNodeIds.has(edge.source) ||
+          visibleNodeIds.has(edge.target) ||
+          edge.id === selectedEdgeId
+      ),
+    };
+  }, [nodes, edges, pan, zoom, viewportSize, selectedNodeIds, selectedEdgeId, draggedNodeId, connectingPort, spatialIndex]);
+
+  const staticCanvasNodes = useMemo(() => {
+    if (!isCanvasSceneActive) return [];
+    const selectedIds = new Set(selectedNodeIds);
+    const settledById = new Map(settledNodes.map((node) => [node.id, node]));
+    return visibleNodes
+      .filter((node) => CANVAS_RENDERABLE_TYPES.has(node.type) && !selectedIds.has(node.id) && node.id !== connectingPort?.nodeId)
+      .map((node) => settledById.get(node.id) ?? node);
+  }, [isCanvasSceneActive, visibleNodes, selectedNodeIds, connectingPort, settledNodes]);
+
+  const domNodes = useMemo(() => {
+    if (!isCanvasSceneActive) return visibleNodes;
+    const selectedIds = new Set(selectedNodeIds);
+    return visibleNodes.filter((node) => !CANVAS_RENDERABLE_TYPES.has(node.type) || selectedIds.has(node.id) || node.id === connectingPort?.nodeId);
+  }, [isCanvasSceneActive, visibleNodes, selectedNodeIds, connectingPort]);
+
+  // A static bitmap should not be repainted merely because the active overlay
+  // moves. Freeze it during geometry interactions, then refresh once on drop.
+  const [settledCanvasNodes, setSettledCanvasNodes] = useState<CanvasNode[]>([]);
+  useEffect(() => {
+    if (!isGeometryInteraction) setSettledCanvasNodes(staticCanvasNodes);
+  }, [staticCanvasNodes, isGeometryInteraction]);
+  const canvasNodesToRender = isGeometryInteraction ? settledCanvasNodes : staticCanvasNodes;
 
   useEffect(() => {
     onRestoreHistoryRef.current = (snapshot: CanvasSnapshot) => {
@@ -578,8 +776,8 @@ export const Editor: React.FC = () => {
 
   // Debounced auto-save diagram state
   useEffect(() => {
-    if (!diagram) return;
-    const currentJson = JSON.stringify({ nodes, edges, drawings });
+    if (!diagram || isGeometryInteraction) return;
+    const currentJson = JSON.stringify({ nodes: settledNodes, edges, drawings });
     latestContentRef.current = currentJson;
     if (lastAttemptedContentRef.current === null || currentJson === lastAttemptedContentRef.current) return;
 
@@ -587,7 +785,7 @@ export const Editor: React.FC = () => {
     const timer = setTimeout(() => { void flushSave(); }, 1000);
 
     return () => clearTimeout(timer);
-  }, [nodes, edges, drawings, diagram, flushSave]);
+  }, [settledNodes, edges, drawings, diagram, flushSave, isGeometryInteraction]);
 
   // Listen to keyboard shortcuts (V, M, H, P, Ctrl+Z, Ctrl+Y, Clipboard, Selection)
   useEffect(() => {
@@ -644,6 +842,12 @@ export const Editor: React.FC = () => {
         setSelectedNodeIds([]);
         setSelectedEdgeId(null);
       } else if (e.key === 'Escape') {
+        if (dragMoveFrameRef.current !== null) cancelAnimationFrame(dragMoveFrameRef.current);
+        dragMoveFrameRef.current = null;
+        pendingDragClientRef.current = null;
+        flushPendingNodeRender();
+        clearNodeDragPreview(true);
+        const hadGeometryInteraction = Boolean(resizeStateRef.current || nodeDragStateRef.current?.isDragging);
         // Cancel active resize
         if (resizeStateRef.current) {
           const rs = resizeStateRef.current;
@@ -666,14 +870,16 @@ export const Editor: React.FC = () => {
           nodesRef.current = revertedNodes;
         }
         nodeDragStateRef.current = null;
+        setIsResizing(false);
         setConnectingPort(null);
         setSnappedPort(null);
         setDraggedNodeId(null);
         setMarqueeStart(null);
         setMarqueeEnd(null);
-        setAlignmentGuides([]);
+        paintAlignmentGuides([]);
         setContextMenu(null);
         setSelectedDrawingId(null);
+        if (hadGeometryInteraction) setRoutingRevision((revision) => revision + 1);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedNodeIds.length > 0) {
           e.preventDefault();
@@ -692,7 +898,7 @@ export const Editor: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [undo, redo, copySelection, cutSelection, pasteClipboard, duplicateSelection, selectAllNodes, selectedNodeIds, selectedEdgeId, selectedDrawingId, deleteSelectedNodes, deleteSelectedEdge, deleteSelectedDrawing, setSelectedNodeIds, setSelectedEdgeId, setSelectedDrawingId, setMarqueeStart, setMarqueeEnd, setConnectingPort, setSnappedPort]);
+  }, [undo, redo, copySelection, cutSelection, pasteClipboard, duplicateSelection, selectAllNodes, selectedNodeIds, selectedEdgeId, selectedDrawingId, deleteSelectedNodes, deleteSelectedEdge, deleteSelectedDrawing, setSelectedNodeIds, setSelectedEdgeId, setSelectedDrawingId, setMarqueeStart, setMarqueeEnd, setConnectingPort, setSnappedPort, flushPendingNodeRender, clearNodeDragPreview, paintAlignmentGuides]);
 
   const getEdgePath = useCallback((edge: CanvasEdge) => calculateEdgePath(edge, nodes), [nodes]);
 
@@ -808,6 +1014,30 @@ export const Editor: React.FC = () => {
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (isCanvasSceneActive && activeMode === 'select' && e.button === 0 && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const point = {
+        x: (e.clientX - rect.left - pan.x) / zoom,
+        y: (e.clientY - rect.top - pan.y) / zoom,
+      };
+      const hitNode = spatialIndex
+        .queryPoint(point.x, point.y)
+        .reverse()
+        .find((node) => {
+          const { width, height } = getNodeDimensions(node);
+          if (node.type === 'decision' || node.type === 'activity-decision') {
+            const dx = Math.abs(point.x - (node.x + width / 2)) / (width / 2);
+            const dy = Math.abs(point.y - (node.y + height / 2)) / (height / 2);
+            return dx + dy <= 1;
+          }
+          return point.x >= node.x && point.x <= node.x + width && point.y >= node.y && point.y <= node.y + height;
+        });
+      if (hitNode) {
+        handleNodeMouseDown(e, hitNode);
+        return;
+      }
+    }
+
     if (activeMode === 'select') {
       setSelectedNodeIds([]);
       setSelectedEdgeId(null);
@@ -920,25 +1150,53 @@ export const Editor: React.FC = () => {
     if (!xSnapped) snappedX = isSnapToGrid ? Math.round(rawX / 20) * 20 : Math.round(rawX);
     if (!ySnapped) snappedY = isSnapToGrid ? Math.round(rawY / 20) * 20 : Math.round(rawY);
 
-    setAlignmentGuides(isSnapToGrid ? guides : []);
+    paintAlignmentGuides(isSnapToGrid ? guides : []);
 
     const effectiveDeltaX = snappedX - primaryInitial.x;
     const effectiveDeltaY = snappedY - primaryInitial.y;
 
-    const nextNodes = currentNodes.map(node => {
-      const init = dragState.initialPositions[node.id];
-      if (init) {
-        return {
-          ...node,
-          x: Math.round(init.x + effectiveDeltaX),
-          y: Math.round(init.y + effectiveDeltaY)
-        };
+    dragPreviewDeltaRef.current = { x: effectiveDeltaX, y: effectiveDeltaY };
+    if (canvasRef.current) {
+      for (const element of canvasRef.current.querySelectorAll<HTMLElement>('[data-canvas-node-id]')) {
+        if (dragState.initialPositions[element.dataset.canvasNodeId || '']) {
+          element.style.transform = `translate3d(${effectiveDeltaX}px, ${effectiveDeltaY}px, 0)`;
+        }
       }
-      return node;
-    });
+      const previewNodes = currentNodes.map((node) => {
+        const initial = dragState.initialPositions[node.id];
+        return initial
+          ? { ...node, x: Math.round(initial.x + effectiveDeltaX), y: Math.round(initial.y + effectiveDeltaY) }
+          : node;
+      });
+      const previewById = new Map(previewNodes.map((node) => [node.id, node]));
+      const edgeGroups = new Map(
+        [...canvasRef.current.querySelectorAll<SVGGElement>('[data-canvas-edge-id]')]
+          .map((element) => [element.dataset.canvasEdgeId, element])
+      );
+      for (const edge of edgesRef.current) {
+        if (!dragState.initialPositions[edge.source] && !dragState.initialPositions[edge.target]) continue;
+        const group = edgeGroups.get(edge.id);
+        if (!group) continue;
+        const path = calculateEdgePath(edge, previewNodes, previewById, { skipObstacleChecks: true });
+        for (const segment of group.querySelectorAll<SVGPathElement>('path[d]')) {
+          if (!dragPreviewEdgePathsRef.current.has(segment)) {
+            dragPreviewEdgePathsRef.current.set(segment, segment.getAttribute('d') || '');
+          }
+          segment.setAttribute('d', path);
+        }
+      }
+    }
+  };
 
-    setNodes(nextNodes);
-    nodesRef.current = nextNodes;
+  const scheduleNodeDragMove = (clientX: number, clientY: number) => {
+    pendingDragClientRef.current = { x: clientX, y: clientY };
+    if (dragMoveFrameRef.current !== null) return;
+    dragMoveFrameRef.current = requestAnimationFrame(() => {
+      dragMoveFrameRef.current = null;
+      const point = pendingDragClientRef.current;
+      pendingDragClientRef.current = null;
+      if (point) handleNodeDragMouseMove(point.x, point.y);
+    });
   };
 
   // Resize interaction handlers
@@ -958,6 +1216,7 @@ export const Editor: React.FC = () => {
       initialW: width,
       initialH: height
     };
+    setIsResizing(true);
   };
 
   const handleResizeMouseMove = (clientX: number, clientY: number) => {
@@ -1015,12 +1274,15 @@ export const Editor: React.FC = () => {
     const nextNodes = nodesRef.current.map(n =>
       n.id === rs.nodeId ? { ...n, x: newX, y: newY, customWidth: newW, customHeight: newH } : n
     );
-    setNodes(nextNodes);
+    scheduleNodeRender(nextNodes);
     nodesRef.current = nextNodes;
   };
 
   // Mouse Move Event Listener
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Geometry interactions are handled by the window listener so that they
+    // continue outside the viewport and run only once per mouse event.
+    if (resizeStateRef.current || nodeDragStateRef.current?.isDown) return;
     if (canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
       const canvasMouseX = (e.clientX - rect.left - pan.x) / zoom;
@@ -1029,17 +1291,6 @@ export const Editor: React.FC = () => {
     }
 
     if (updateEditableEdgeInteraction(e.clientX, e.clientY)) return;
-
-    // Handle resize dragging first
-    if (resizeStateRef.current) {
-      handleResizeMouseMove(e.clientX, e.clientY);
-      return;
-    }
-
-    if (nodeDragStateRef.current?.isDown && activeMode === 'select') {
-      handleNodeDragMouseMove(e.clientX, e.clientY);
-      return;
-    }
 
     if (isPanning) {
       setPan({
@@ -1104,7 +1355,15 @@ export const Editor: React.FC = () => {
   };
 
   const handleMouseUp = () => {
+    if (dragMoveFrameRef.current !== null) cancelAnimationFrame(dragMoveFrameRef.current);
+    dragMoveFrameRef.current = null;
+    const finalDragPoint = pendingDragClientRef.current;
+    pendingDragClientRef.current = null;
+    if (finalDragPoint) handleNodeDragMouseMove(finalDragPoint.x, finalDragPoint.y);
     finishEditableEdgeInteraction();
+    // Ensure the final pointer position is in React state before history and
+    // autosave inspect the document.
+    flushPendingNodeRender();
 
     // Process marquee bounds check
     if (marqueeStart && marqueeEnd && (activeMode === 'mark' || activeMode === 'select')) {
@@ -1153,8 +1412,20 @@ export const Editor: React.FC = () => {
     }
 
     const dragState = nodeDragStateRef.current;
+    const didMoveNode = Boolean(dragState?.isDragging);
     if (dragState && dragState.isDown) {
       if (dragState.isDragging) {
+        const delta = dragPreviewDeltaRef.current;
+        if (delta) {
+          const nextNodes = nodesRef.current.map((node) => {
+            const initial = dragState.initialPositions[node.id];
+            return initial
+              ? { ...node, x: Math.round(initial.x + delta.x), y: Math.round(initial.y + delta.y) }
+              : node;
+          });
+          nodesRef.current = nextNodes;
+          setNodes(nextNodes);
+        }
         // Drag occurred! Persist new positions into undo history
         saveHistoryState(nodesRef.current, edges, drawings);
       } else {
@@ -1174,14 +1445,20 @@ export const Editor: React.FC = () => {
     }
 
     setDraggedNodeId(null);
-    setAlignmentGuides([]);
+    // React commits the final positions at the end of this event. Clear the
+    // preview on the next frame to avoid flashing the original coordinates.
+    requestAnimationFrame(() => clearNodeDragPreview());
+    paintAlignmentGuides([]);
     setIsPanning(false);
 
     // Complete resize
+    const didResizeNode = Boolean(resizeStateRef.current);
     if (resizeStateRef.current) {
       resizeStateRef.current = null;
+      setIsResizing(false);
       saveHistoryState(nodesRef.current, edges, drawings);
     }
+    if (didMoveNode || didResizeNode) setRoutingRevision((revision) => revision + 1);
 
     if (connectingPort) {
       if (snappedPort) {
@@ -1207,7 +1484,7 @@ export const Editor: React.FC = () => {
     if (resizeStateRef.current) {
       handleResizeMouseMove(e.clientX, e.clientY);
     } else if (nodeDragStateRef.current?.isDown && activeMode === 'select') {
-      handleNodeDragMouseMove(e.clientX, e.clientY);
+      scheduleNodeDragMove(e.clientX, e.clientY);
     }
   };
 
@@ -1265,17 +1542,23 @@ export const Editor: React.FC = () => {
     const rect = canvasRef.current.getBoundingClientRect();
     // Keep the menu inside the canvas viewport, especially near the right/bottom edges.
     const menuWidth = 220;
-    const menuHeight = targetNodeId ? 360 : 240;
-    const menuX = Math.max(8, Math.min(e.clientX - rect.left, rect.width - menuWidth - 8));
-    const menuY = Math.max(8, Math.min(e.clientY - rect.top, rect.height - menuHeight - 8));
     const canvasMouseX = (e.clientX - rect.left - pan.x) / zoom;
     const canvasMouseY = (e.clientY - rect.top - pan.y) / zoom;
+    const resolvedNodeId = targetNodeId ?? (isCanvasSceneActive
+      ? spatialIndex.queryPoint(canvasMouseX, canvasMouseY).reverse().find((node) => {
+          const { width, height } = getNodeDimensions(node);
+          return canvasMouseX >= node.x && canvasMouseX <= node.x + width && canvasMouseY >= node.y && canvasMouseY <= node.y + height;
+        })?.id ?? null
+      : null);
+    const menuHeight = resolvedNodeId ? 360 : 240;
+    const menuX = Math.max(8, Math.min(e.clientX - rect.left, rect.width - menuWidth - 8));
+    const menuY = Math.max(8, Math.min(e.clientY - rect.top, rect.height - menuHeight - 8));
 
     // If targetNodeId is specified, ensure it is selected!
-    if (targetNodeId && !selectedNodeIds.includes(targetNodeId)) {
-      setSelectedNodeIds([targetNodeId]);
+    if (resolvedNodeId && !selectedNodeIds.includes(resolvedNodeId)) {
+      setSelectedNodeIds([resolvedNodeId]);
       setSelectedEdgeId(null);
-    } else if (!targetNodeId) {
+    } else if (!resolvedNodeId) {
       setSelectedNodeIds([]);
       setSelectedEdgeId(null);
     }
@@ -1285,9 +1568,9 @@ export const Editor: React.FC = () => {
       y: menuY,
       canvasX: canvasMouseX,
       canvasY: canvasMouseY,
-      targetNodeId
+      targetNodeId: resolvedNodeId
     });
-  }, [pan, zoom, selectedNodeIds, setSelectedNodeIds, setSelectedEdgeId]);
+  }, [pan, zoom, selectedNodeIds, setSelectedNodeIds, setSelectedEdgeId, isCanvasSceneActive, spatialIndex]);
 
   // Clickaway listener to close context menu
   useEffect(() => {
@@ -2176,6 +2459,17 @@ export const Editor: React.FC = () => {
                     <span>Generate Diagram</span>
                   </button>
 
+                  {codePreview && (
+                    <CodeImportPreview
+                      result={codePreview.result}
+                      mode={codePreview.mode}
+                      existingNodes={nodes.length}
+                      existingEdges={edges.length}
+                      onApply={handleApplyCodePreview}
+                      onCancel={() => setCodePreview(null)}
+                    />
+                  )}
+
                   <div className="text-[9.5px] text-ink-soft border-t border-line pt-2 leading-tight">
                     Supports <code className="text-ink font-bold">flowchart LR/TD</code>, <code className="text-ink font-bold">A[(DB)]</code>, <code className="text-ink font-bold">A([Pill])</code>, <code className="text-ink font-bold">A{`{Diamond}`}</code>, <code className="text-ink font-bold">erDiagram</code>, <code className="text-ink font-bold">sequenceDiagram</code>, & chained arrows <code className="text-ink font-bold">A --&gt; B --&gt; C</code>.
                   </div>
@@ -2301,7 +2595,9 @@ export const Editor: React.FC = () => {
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          onMouseLeave={() => {
+            if (!nodeDragStateRef.current?.isDown && !resizeStateRef.current) handleMouseUp();
+          }}
           onWheel={handleCanvasWheel}
           onContextMenu={(e) => handleContextMenu(e, null)}
           className={`flex-1 relative overflow-hidden diagram-canvas ${
@@ -2371,7 +2667,7 @@ export const Editor: React.FC = () => {
 
           {/* Canvas Minimap / Overview Navigator */}
           <Minimap
-            nodes={nodes}
+            nodes={settledNodes}
             pan={pan}
             zoom={zoom}
             onPanChange={setPan}
@@ -2383,12 +2679,12 @@ export const Editor: React.FC = () => {
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
               transformOrigin: '0 0',
             }}
-            className="absolute inset-0 pointer-events-none"
+            className="absolute inset-0 z-0 pointer-events-none"
           >
             {/* SVG rendering layer */}
             <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-auto overflow-visible">
               <EdgeLayer
-                edges={edges}
+                edges={visibleEdges}
                 nodes={nodes}
                 selectedEdgeId={selectedEdgeId}
                 activeMode={activeMode}
@@ -2397,6 +2693,8 @@ export const Editor: React.FC = () => {
                 snappedPort={snappedPort}
                 tempEdgeEnd={tempEdgeEnd}
                 diagramType={diagram?.type}
+                isRoutingDeferred={draggedNodeId !== null || isResizing}
+                routingRevision={routingRevision}
                 onSelectEdge={(id) => {
                   setSelectedEdgeId(id);
                   setSelectedNodeIds([]);
@@ -2424,24 +2722,41 @@ export const Editor: React.FC = () => {
               />
 
               {/* Dynamic magnetic alignment guide lines */}
-              {alignmentGuides.map((guide, idx) => (
+              {[0, 1].map((index) => (
                 <line
-                  key={`guide-${idx}`}
-                  x1={guide.x1}
-                  y1={guide.y1}
-                  x2={guide.x2}
-                  y2={guide.y2}
+                  key={`guide-${index}`}
+                  ref={(element) => { alignmentGuideRefs.current[index] = element; }}
                   stroke={dc.blueprint}
                   strokeWidth="1.5"
                   strokeDasharray="4 4"
                   className="pointer-events-none"
+                  style={{ display: 'none' }}
                 />
               ))}
             </svg>
 
-            {/* Interactive HTML Card Nodes */}
+          </div>
+
+          {isCanvasSceneActive && (
+            <StaticNodeCanvasLayer
+              nodes={canvasNodesToRender}
+              pan={pan}
+              zoom={zoom}
+              width={viewportSize.width}
+              height={viewportSize.height}
+            />
+          )}
+
+          {/* Interactive HTML Card Nodes */}
+          <div
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: '0 0',
+            }}
+            className="absolute inset-0 z-20 pointer-events-none"
+          >
             <div className="absolute inset-0 pointer-events-none">
-              {nodes.map((node) => {
+              {domNodes.map((node) => {
                 const isSelected = selectedNodeIds.includes(node.id);
                 const { width, height } = getNodeDimensions(node);
                 const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
@@ -2503,6 +2818,7 @@ export const Editor: React.FC = () => {
                 return (
                   <div
                     key={node.id}
+                    data-canvas-node-id={node.id}
                     onMouseDown={(e) => handleNodeMouseDown(e, node)}
                     onMouseUp={(e) => handleNodeMouseUp(e, node)}
                     onContextMenu={(e) => handleContextMenu(e, node.id)}
@@ -2723,49 +3039,7 @@ export const Editor: React.FC = () => {
                     ) : node.type === 'sequence-activation' ? (
                       <div className="absolute inset-0 bg-paper-raised pointer-events-none animate-pulse-subtle" />
                     ) : node.type === 'table' ? (
-                      <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
-                        {/* Colored Header Banner */}
-                        <div 
-                          className="py-1.5 px-3 border-b-2 border-ink font-mono font-bold text-white uppercase select-none truncate text-center tracking-wider shrink-0"
-                          style={{
-                            backgroundColor: (node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#'))
-                              ? node.shadowAccent
-                              : '#1E5C8C',
-                            ...textStyleObj
-                          }}
-                        >
-                          {node.label}
-                        </div>
-                        {/* Table Fields Body */}
-                        <div className="flex-1 p-2.5 flex flex-col gap-1.5 select-none font-mono text-[11px]">
-                          {(node.fields || []).map((f, idx) => {
-                            const parts = f.split(' ');
-                            const fieldName = parts[0] || '';
-                            const fieldType = parts.slice(1).join(' ') || '';
-                            const isPk = f.toLowerCase().includes('pk');
-                            const isFk = f.toLowerCase().includes('fk');
-                            const rawType = fieldType.replace(/\b(pk|fk)\b/gi, '').trim();
-                            return (
-                              <div key={idx} className="flex justify-between items-center gap-2 border-b border-dashed border-line last:border-0 pb-1">
-                                <span className="text-ink font-bold truncate">{fieldName}</span>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {rawType && <span className="text-ink-soft text-[10px]">{rawType}</span>}
-                                  {isPk && (
-                                    <span className="px-1 py-0.5 text-[8px] font-bold bg-blueprint text-white rounded-[2px] leading-none uppercase">
-                                      PK
-                                    </span>
-                                  )}
-                                  {isFk && (
-                                    <span className="px-1 py-0.5 text-[8px] font-bold border border-blueprint text-blueprint rounded-[2px] leading-none uppercase">
-                                      FK
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                      <TableNodeContent node={node} />
                     ) : node.type === 'activity-start' ? (
                       <div className="w-full h-full select-none" />
                     ) : node.type === 'activity-end' ? (
