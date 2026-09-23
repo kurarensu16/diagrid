@@ -182,7 +182,8 @@ export const getOrthogonalRoutePath = (
   hB: 'top' | 'bottom' | 'left' | 'right',
   sourceNode: CanvasNode,
   targetNode: CanvasNode,
-  allNodes: CanvasNode[]
+  allNodes: CanvasNode[],
+  options?: { skipSearch?: boolean; skipObstacleChecks?: boolean }
 ): string => {
   const isHorizA = (hA === 'left' || hA === 'right');
   const isHorizB = (hB === 'left' || hB === 'right');
@@ -247,6 +248,18 @@ export const getOrthogonalRoutePath = (
     if (routeIsClear(path)) {
       return buildSvgPath(simplifyOrthogonalPath(path));
     }
+  }
+
+  if (options?.skipObstacleChecks) {
+    return buildSvgPath(simplifyOrthogonalPath(candidates[0]));
+  }
+
+  // The Hanan-grid search is useful for a handful of difficult routes but it
+  // grows rapidly with the number of obstacles. Interactive editors use a
+  // bounded fast route while dragging (and for dense scenes) to protect the
+  // frame budget instead of blocking pointer input on pathfinding.
+  if (options?.skipSearch) {
+    return buildSvgPath(simplifyOrthogonalPath(candidates[0]));
   }
 
   // Dijkstra search on Hanan Grid
@@ -351,10 +364,12 @@ export const getOrthogonalRoutePath = (
 // Universal edge path calculation used across Editor, PublicViewer, and EmbedWidget
 export const calculateEdgePath = (
   edge: CanvasEdge,
-  allNodes: CanvasNode[]
+  allNodes: CanvasNode[],
+  nodesById?: ReadonlyMap<string, CanvasNode>,
+  options?: { skipSearch?: boolean; skipObstacleChecks?: boolean }
 ): string => {
-  const sourceNode = allNodes.find(n => n.id === edge.source);
-  const targetNode = allNodes.find(n => n.id === edge.target);
+  const sourceNode = nodesById?.get(edge.source) ?? allNodes.find(n => n.id === edge.source);
+  const targetNode = nodesById?.get(edge.target) ?? allNodes.find(n => n.id === edge.target);
   if (!sourceNode || !targetNode) return '';
 
   const start = getPortCoords(sourceNode, edge.sourceHandle || 'right');
@@ -371,6 +386,7 @@ export const calculateEdgePath = (
     edge.targetHandle || 'left',
     sourceNode,
     targetNode,
-    allNodes
+    allNodes,
+    options
   );
 };
