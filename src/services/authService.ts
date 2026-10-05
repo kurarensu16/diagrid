@@ -218,15 +218,13 @@ export const authService = {
     }
     setCachedUser(user);
 
-    // Record audit trail event asynchronously
+    // Record telemetry through the actor-bound RPC. Direct audit-table inserts
+    // are intentionally revoked for browser roles.
     if (user && isSupabaseConfigured()) {
       Promise.resolve(
-        supabase.from('audit_logs').insert({
-          user_id: user.id,
-          user_email: user.email,
-          action: 'signed_in',
-          target: 'Dashboard session established',
-          created_at: new Date().toISOString()
+        supabase.rpc('log_user_activity', {
+          activity_action: 'signed_in',
+          activity_target: 'Dashboard session established',
         })
       ).catch(() => {});
     }

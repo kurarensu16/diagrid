@@ -127,6 +127,10 @@ test('offline creation keeps the latest diagram and syncs each item once after r
       return { ok: true, value: { nodes: parsed.nodes || [], edges: parsed.edges || [], drawings: parsed.drawings || [] } };
     },
   };
+  const adminServiceStub = {
+    logActivity() {},
+    getSystemSettingsSync() { return { max_projects_per_user: 0 }; },
+  };
   const offlineSyncService = loadService('offlineSyncService.ts', {
     './authService': { authService },
     './cloudSaveStatus': { cloudSaveStatus },
@@ -137,7 +141,7 @@ test('offline creation keeps the latest diagram and syncs each item once after r
     './supabase': supabaseModule,
     './authService': { authService },
     './mockDb': { mockDb },
-    './adminService': { adminService: { logActivity() {} } },
+    './adminService': { adminService: adminServiceStub },
     './cloudSaveStatus': { cloudSaveStatus },
     './offlineSyncService': { offlineSyncService },
   }).projectService;
@@ -146,7 +150,7 @@ test('offline creation keeps the latest diagram and syncs each item once after r
     './authService': { authService },
     './mockDb': { mockDb },
     './projectService': { projectService },
-    './adminService': { adminService: { logActivity() {} } },
+    './adminService': { adminService: adminServiceStub },
     './cloudSaveStatus': { cloudSaveStatus },
     './offlineSyncService': { offlineSyncService },
     '../utils/diagramSecurity': diagramSecurity,
