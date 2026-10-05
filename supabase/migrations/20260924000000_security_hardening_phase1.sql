@@ -6,6 +6,18 @@
 -- work because their content lives in the URL fragment and never queries this
 -- table. A token-based server share model can be added in a later migration.
 -- ---------------------------------------------------------------------------
+-- Older hosted projects predate account suspension. Add and backfill the
+-- authorization column before any policy helper references it.
+alter table public.profiles
+  add column if not exists status text;
+update public.profiles
+set status = 'active'
+where status is null;
+alter table public.profiles
+  alter column status set default 'active',
+  alter column status set not null;
+create index if not exists idx_profiles_status on public.profiles(status);
+
 create or replace function public.is_active_user()
 returns boolean
 language sql
