@@ -1,6 +1,6 @@
 # Diagrid Security Hardening Record
 
-Last updated: 2026-09-24  
+Last updated: 2026-10-05
 Implementation status: Phase 1 implemented locally; database migration still requires deployment to Supabase.
 
 ## Purpose
@@ -201,7 +201,7 @@ Updated direct and transitive packages include:
 - DOMPurify to patched `3.4.x`
 - Browserslist, Nano ID, and baseline-browser-mapping to patched releases
 
-Result: `npm audit --audit-level=moderate` reports `found 0 vulnerabilities` as of 2026-09-24.
+As of 2026-10-05, `npm audit --omit=dev --audit-level=high` reports zero production vulnerabilities. A full development-tree audit reports five high findings through Tailwind 3's glob tooling because `braces <= 3.0.3` has a newly published stack-exhaustion advisory and no patched release. This code is used at build time and is not shipped in the production browser bundle. The Phase 2 plan tracks a Tailwind 4 migration or patched-upstream adoption rather than applying an unreviewed forced major upgrade.
 
 ### 11. Security tests
 
@@ -226,19 +226,19 @@ Added regression coverage for:
 The following checks were run locally:
 
 ```text
-npm audit --audit-level=moderate  -> passed, 0 vulnerabilities
+npm audit --omit=dev --audit-level=high -> passed, 0 production vulnerabilities
 npx tsc -b                       -> passed
-npm run test:unit                -> passed, 18 tests
+npm run test:unit                -> passed, 23 tests
 ```
 
 Additional verification:
 
 ```text
 npm run build                     -> passed
-npm run lint                      -> passed with six pre-existing warnings
+npm run lint                      -> passed with seven pre-existing warnings
 ```
 
-The production build retains the existing bundle-size warning for the main client chunk. The remaining lint warnings are existing React Fast Refresh and hook-dependency warnings outside this security change.
+The production build retains the existing bundle-size warning for the main client chunk. The remaining lint warnings are existing React Fast Refresh and hook-dependency warnings outside this security change. The new pgTAP suite is checked in but could not run locally on 2026-10-05 because Docker Desktop was unavailable; it is configured to run in GitHub Actions.
 
 ## Required deployment steps
 
@@ -262,6 +262,9 @@ Before deployment:
 
 ## Known remaining work
 
+The implementation sequence for these items is maintained in
+[`SECURITY_PHASE_2_PLAN.md`](./SECURITY_PHASE_2_PLAN.md).
+
 The following items are intentionally not represented as complete:
 
 1. Add automated pgTAP/RLS tests under `supabase/tests` and run them in CI.
@@ -275,6 +278,7 @@ The following items are intentionally not represented as complete:
 9. Add CSP reporting and monitor violations before further narrowing `style-src` and `img-src`.
 10. Add secret scanning, SAST, dependency review, and security tests to CI.
 11. Review remaining `localStorage` data and offline queues for privacy retention and clear them on account removal/sign-out where appropriate.
+12. Migrate from Tailwind 3 build tooling, or adopt a patched `braces` release when one becomes available, to clear CVE-2026-93687 from the development dependency tree.
 
 ## Reference standards
 

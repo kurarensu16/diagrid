@@ -603,60 +603,6 @@ export const adminService = {
     }
   },
 
-  /**
-   * Seed initial sample audit logs into Supabase for testing.
-   */
-  seedSampleLogs: async (): Promise<{ count?: number; error?: string }> => {
-    if (!isSupabaseConfigured()) {
-      return { error: 'Supabase is not configured' };
-    }
-
-    try {
-      const activeUser = authService.getUserSync();
-      const userEmail = activeUser?.email || 'admin@diagrid.dev';
-      const userId = activeUser?.id || null;
-
-      const samples = [
-        {
-          user_id: userId,
-          user_email: userEmail,
-          action: 'signed_in',
-          target: 'Dashboard session established',
-          created_at: new Date().toISOString(),
-        },
-        {
-          user_id: userId,
-          user_email: userEmail,
-          action: 'created_project',
-          target: 'Production Architecture Core',
-          created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-        },
-        {
-          user_id: userId,
-          user_email: userEmail,
-          action: 'created_diagram',
-          target: 'Relational Schema (ERD)',
-          created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-        },
-        {
-          user_id: userId,
-          user_email: userEmail,
-          action: 'exported_diagram',
-          target: 'Microservices Flowchart (PNG)',
-          created_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-        },
-      ];
-
-      const { data, error } = await supabase.from('audit_logs').insert(samples).select();
-      if (error) throw error;
-
-      return { count: data?.length || samples.length };
-    } catch (err: any) {
-      console.error('[adminService] seedSampleLogs error:', err.message);
-      return { error: err.message || 'Failed to seed sample logs' };
-    }
-  },
-
   // ==========================================
   // SUPPORTER BADGE & PERK CLAIMS
   // ==========================================
