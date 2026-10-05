@@ -121,6 +121,12 @@ test('offline creation keeps the latest diagram and syncs each item once after r
     },
   };
   const supabaseModule = { supabase, isSupabaseConfigured: () => true };
+  const diagramSecurity = {
+    parseAndValidateDiagramContent(input) {
+      const parsed = typeof input === 'string' ? JSON.parse(input) : input;
+      return { ok: true, value: { nodes: parsed.nodes || [], edges: parsed.edges || [], drawings: parsed.drawings || [] } };
+    },
+  };
   const offlineSyncService = loadService('offlineSyncService.ts', {
     './authService': { authService },
     './cloudSaveStatus': { cloudSaveStatus },
@@ -143,6 +149,7 @@ test('offline creation keeps the latest diagram and syncs each item once after r
     './adminService': { adminService: { logActivity() {} } },
     './cloudSaveStatus': { cloudSaveStatus },
     './offlineSyncService': { offlineSyncService },
+    '../utils/diagramSecurity': diagramSecurity,
   }).diagramService;
 
   const project = await projectService.createProject('Offline project', 'Saved here first');
@@ -156,7 +163,7 @@ test('offline creation keeps the latest diagram and syncs each item once after r
   assert.equal((await projectService.getProjects()).find(p => p.id === project.id)?.name, 'Offline project');
   assert.equal((await diagramService.getDiagrams(project.id)).find(d => d.id === diagram.id)?.title, 'Offline diagram');
 
-  const latestContent = JSON.stringify({ nodes: [{ id: 'latest' }], edges: [] });
+  const latestContent = JSON.stringify({ nodes: [{ id: 'latest' }], edges: [], drawings: [] });
   assert.equal((await diagramService.saveDiagram(diagram.id, latestContent)).status, 'cloud-failed');
   assert.equal(diagrams.get(diagram.id).content, latestContent);
 

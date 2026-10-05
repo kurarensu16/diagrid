@@ -229,7 +229,7 @@ export const getDefaultDimensions = (node: CanvasNode): { width: number; height:
   }
   if (node.type === 'decision') return { width: 96, height: 96 };
   if (node.type === 'terminal') return { width: 120, height: 38 };
-  if (node.type === 'dfd-store') return { width: 140, height: 48 };
+  if (node.type === 'dfd-store') return { width: 160, height: 48 };
   if (node.type === 'dfd-entity') return { width: 120, height: 56 };
   if (node.type === 'dfd-process') return { width: 130, height: 64 };
   if (node.type === 'usecase-actor') return { width: 70, height: 90 };
@@ -258,6 +258,7 @@ export const getMinDimensions = (node: CanvasNode): { width: number; height: num
   if (node.type === 'usecase-actor') return { width: 40, height: 50 };
   if (node.type === 'sequence-activation') return { width: 14, height: 40 };
   if (node.type === 'text') return { width: 40, height: 24 };
+  if (node.type === 'dfd-store') return { width: 80, height: 36 };
   return { width: 60, height: 28 };
 };
 

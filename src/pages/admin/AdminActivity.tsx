@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { adminService, type ActivityLog } from '../../services/adminService';
 import { Calendar, User, Info, Search, RefreshCw, Trash2, ArrowUpRight, LogIn, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
@@ -13,6 +14,9 @@ export const AdminActivity: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [pruneModalOpen, setPruneModalOpen] = useState(false);
+  const [isPruning, setIsPruning] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     handleRefresh();
@@ -31,6 +35,27 @@ export const AdminActivity: React.FC = () => {
       setIsRefreshing(false);
       setIsLoading(false);
     }
+  };
+
+  const handlePruneLogs = async () => {
+    setIsPruning(true);
+    try {
+      const res = await adminService.pruneAuditLogs();
+      if (res.error) {
+        showNotice(`Pruning failed: ${res.error}`);
+      } else {
+        showNotice(`Successfully pruned ${res.count ?? 0} expired audit log(s).`);
+        await handleRefresh();
+      }
+    } finally {
+      setIsPruning(false);
+      setPruneModalOpen(false);
+    }
+  };
+
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(null), 4000);
   };
 
   const filteredLogs = logs.filter((log) => {
@@ -77,11 +102,26 @@ export const AdminActivity: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
             sync_feed()
           </button>
+          <button
+            onClick={() => setPruneModalOpen(true)}
+            className="flex items-center gap-1.5 font-mono text-[11px] border border-line px-3 py-1.5 hover:border-signal hover:text-signal hover:bg-paper-raised transition-colors cursor-pointer"
+            title="Prune audit logs older than retention period"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-signal" />
+            prune_expired()
+          </button>
           <div className="font-mono text-[12px] text-ink-soft">
             ENTRIES: {filteredLogs.length}
           </div>
         </div>
       </div>
+
+      {notice && (
+        <div className="bg-blueprint/10 border border-blueprint text-blueprint px-4 py-2 font-mono text-[12px] flex items-center gap-2">
+          <Info className="w-4 h-4 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
 
       {/* Filter and search controls */}
       <div className="flex flex-col lg:flex-row gap-4 justify-between items-stretch lg:items-center">
@@ -256,6 +296,16 @@ export const AdminActivity: React.FC = () => {
           )}
         </div>
       )}
+      <ConfirmModal
+        isOpen={pruneModalOpen}
+        onClose={() => setPruneModalOpen(false)}
+        onConfirm={handlePruneLogs}
+        title="PRUNE_EXPIRED_AUDIT_LOGS"
+        message="Permanently prune expired audit logs?"
+        description={`This will purge all audit log records older than the configured ${adminService.getSystemSettingsSync().audit_retention_days} days retention period. This action cannot be undone.`}
+        confirmText={isPruning ? "Pruning..." : "Prune Expired Logs"}
+        danger={true}
+      />
     </div>
   );
 };

@@ -144,6 +144,19 @@ export const projectService = {
   createProject: async (name: string, description: string): Promise<Project> => {
     const user = authService.getUserSync();
 
+    // Check project quota (exempting administrators and supporters)
+    const settings = adminService.getSystemSettingsSync();
+    const isAdmin = user?.role === 'admin';
+    const isSupporter = !!user?.is_supporter;
+    if (user && !isAdmin && !isSupporter && settings.max_projects_per_user > 0) {
+      const existingProjects = await projectService.getProjects();
+      if (existingProjects.length >= settings.max_projects_per_user) {
+        throw new Error(
+          `Project limit reached (${existingProjects.length}/${settings.max_projects_per_user}). Delete existing projects or support Diagrid to unlock unlimited workspaces.`
+        );
+      }
+    }
+
     if (!isSupabaseConfigured() || !user) {
       return mockDb.createProject(name, description);
     }

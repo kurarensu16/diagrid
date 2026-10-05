@@ -80,6 +80,21 @@ as $$
   );
 $$;
 
+create or replace function public.is_active_user()
+returns boolean
+language sql
+security definer set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and (status = 'active' or role = 'admin'::public.user_role)
+  );
+$$;
+
+revoke all on function public.is_active_user() from public, anon;
+grant execute on function public.is_active_user() to authenticated;
+
 drop policy if exists "Users can view their own profile" on public.profiles;
 create policy "Users can view their own profile"
   on public.profiles for select
@@ -195,8 +210,13 @@ values ('thumbnails', 'thumbnails', true)
 on conflict (id) do nothing;
 
 insert into storage.buckets (id, name, public) 
-values ('feedback-attachments', 'feedback-attachments', true)
+values ('feedback-attachments', 'feedback-attachments', false)
 on conflict (id) do nothing;
+
+update storage.buckets
+set file_size_limit = 2097152,
+    allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id = 'avatars';
 
 -- Storage Policies
 drop policy if exists "Public view avatars" on storage.objects;
@@ -208,7 +228,7 @@ drop policy if exists "Users upload own avatar" on storage.objects;
 create policy "Users upload own avatar"
   on storage.objects for insert
   with check (
-    bucket_id = 'avatars' and 
+    public.is_active_user() and bucket_id = 'avatars' and
     auth.uid() = (storage.foldername(name))[1]::uuid
   );
 
@@ -223,14 +243,16 @@ create policy "Users upload thumbnails"
   with check (bucket_id = 'thumbnails' and auth.uid() is not null);
 
 drop policy if exists "Public view feedback attachments" on storage.objects;
-create policy "Public view feedback attachments"
-  on storage.objects for select
-  using (bucket_id = 'feedback-attachments');
-
 drop policy if exists "Anyone upload feedback attachments" on storage.objects;
-create policy "Anyone upload feedback attachments"
+drop policy if exists "Authenticated users upload own feedback attachments" on storage.objects;
+create policy "Authenticated users upload own feedback attachments"
   on storage.objects for insert
-  with check (bucket_id = 'feedback-attachments');
+  to authenticated
+  with check (
+    public.is_active_user()
+    and bucket_id = 'feedback-attachments'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 -- ==============================================================================
 -- 9. ADMIN PROMOTION UTILITY FUNCTION
@@ -279,25 +301,33 @@ alter table public.projects enable row level security;
 
 -- Policies for projects
 drop policy if exists "Users can view own projects" on public.projects;
-create policy "Users can view own projects"
+drop policy if exists "Active users can view own projects" on public.projects;
+create policy "Active users can view own projects"
   on public.projects for select
-  using (auth.uid() = user_id or public.is_admin());
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()));
 
 drop policy if exists "Users can create own projects" on public.projects;
-create policy "Users can create own projects"
+drop policy if exists "Active users can create own projects" on public.projects;
+create policy "Active users can create own projects"
   on public.projects for insert
-  with check (auth.uid() = user_id);
+  to authenticated
+  with check (public.is_active_user() and auth.uid() = user_id);
 
 drop policy if exists "Users can update own projects" on public.projects;
-create policy "Users can update own projects"
+drop policy if exists "Active users can update own projects" on public.projects;
+create policy "Active users can update own projects"
   on public.projects for update
-  using (auth.uid() = user_id or public.is_admin())
-  with check (auth.uid() = user_id or public.is_admin());
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()))
+  with check (public.is_active_user() and (auth.uid() = user_id or public.is_admin()));
 
 drop policy if exists "Users can delete own projects" on public.projects;
-create policy "Users can delete own projects"
+drop policy if exists "Active users can delete own projects" on public.projects;
+create policy "Active users can delete own projects"
   on public.projects for delete
-  using (auth.uid() = user_id or public.is_admin());
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()));
 
 -- Auto-update timestamp trigger for projects
 drop trigger if exists trigger_projects_updated_at on public.projects;
@@ -326,31 +356,74 @@ create index if not exists idx_diagrams_project_id on public.diagrams(project_id
 create index if not exists idx_diagrams_user_id on public.diagrams(user_id);
 create index if not exists idx_diagrams_updated_at on public.diagrams(updated_at desc);
 
+-- Coarse database limits protect direct API writes that bypass client validation.
+-- NOT VALID preserves legacy rows while enforcing the constraint on new writes.
+alter table public.diagrams
+  drop constraint if exists diagrams_content_security_limits;
+alter table public.diagrams
+  add constraint diagrams_content_security_limits check (
+    jsonb_typeof(content) = 'object'
+    and octet_length(content::text) <= 2097152
+    and coalesce(jsonb_typeof(content -> 'nodes') = 'array', false)
+    and jsonb_array_length(content -> 'nodes') <= 500
+    and coalesce(jsonb_typeof(content -> 'edges') = 'array', false)
+    and jsonb_array_length(content -> 'edges') <= 2000
+    and (
+      not (content ? 'drawings')
+      or (
+        jsonb_typeof(content -> 'drawings') = 'array'
+        and jsonb_array_length(content -> 'drawings') <= 500
+      )
+    )
+  ) not valid;
+
 -- Enable RLS
 alter table public.diagrams enable row level security;
 
 -- Policies for diagrams
 drop policy if exists "Users can view own diagrams" on public.diagrams;
 drop policy if exists "Public can view diagrams" on public.diagrams;
-create policy "Public can view diagrams"
+drop policy if exists "Owners and admins can view diagrams" on public.diagrams;
+create policy "Owners and admins can view diagrams"
   on public.diagrams for select
-  using (true);
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()));
 
 drop policy if exists "Users can create own diagrams" on public.diagrams;
-create policy "Users can create own diagrams"
+drop policy if exists "Users can create diagrams in own projects" on public.diagrams;
+create policy "Users can create diagrams in own projects"
   on public.diagrams for insert
-  with check (auth.uid() = user_id);
+  to authenticated
+  with check (
+    public.is_active_user()
+    and auth.uid() = user_id
+    and exists (
+      select 1 from public.projects
+      where projects.id = project_id and projects.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "Users can update own diagrams" on public.diagrams;
 create policy "Users can update own diagrams"
   on public.diagrams for update
-  using (auth.uid() = user_id or public.is_admin())
-  with check (auth.uid() = user_id or public.is_admin());
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()))
+  with check (
+    public.is_admin()
+    or (
+      auth.uid() = user_id
+      and exists (
+        select 1 from public.projects
+        where projects.id = project_id and projects.user_id = auth.uid()
+      )
+    )
+  );
 
 drop policy if exists "Users can delete own diagrams" on public.diagrams;
 create policy "Users can delete own diagrams"
   on public.diagrams for delete
-  using (auth.uid() = user_id or public.is_admin());
+  to authenticated
+  using (public.is_active_user() and (auth.uid() = user_id or public.is_admin()));
 
 -- Auto-update timestamp trigger for diagrams
 drop trigger if exists trigger_diagrams_updated_at on public.diagrams;
@@ -471,10 +544,26 @@ create index if not exists idx_feedback_created_at on public.feedback(created_at
 
 alter table public.feedback enable row level security;
 
+revoke insert on public.feedback from anon, authenticated;
+grant insert (user_id, user_email, type, rating, rating_label, message, page_url, client_metadata, attachment_url, priority)
+  on public.feedback to anon, authenticated;
+
 drop policy if exists "Anyone can insert feedback" on public.feedback;
-create policy "Anyone can insert feedback"
+drop policy if exists "Validated feedback can be submitted" on public.feedback;
+create policy "Validated feedback can be submitted"
   on public.feedback for insert
-  with check (true);
+  to anon, authenticated
+  with check (
+    (user_id is null or user_id = auth.uid())
+    and char_length(user_email) between 3 and 320
+    and type in ('feature', 'bug', 'general')
+    and rating between 1 and 5
+    and char_length(message) between 1 and 10000
+    and coalesce(char_length(page_url), 0) <= 2048
+    and priority in ('low', 'medium', 'high', 'critical')
+    and status = 'new'
+    and admin_notes = ''
+  );
 
 drop policy if exists "Admins can view feedback" on public.feedback;
 create policy "Admins can view feedback"
@@ -517,9 +606,7 @@ create index if not exists idx_audit_logs_user_email on public.audit_logs(user_e
 alter table public.audit_logs enable row level security;
 
 drop policy if exists "Anyone authenticated can insert audit logs" on public.audit_logs;
-create policy "Anyone authenticated can insert audit logs"
-  on public.audit_logs for insert
-  with check (true);
+revoke insert on public.audit_logs from anon, authenticated;
 
 drop policy if exists "Admins can view audit logs" on public.audit_logs;
 create policy "Admins can view audit logs"
@@ -610,10 +697,22 @@ begin
     raise exception 'Unauthorized: Admin role required';
   end if;
 
+  if target_status not in ('active', 'suspended') then
+    raise exception 'Invalid user status';
+  end if;
+  if target_user_id = auth.uid() and target_status = 'suspended' then
+    raise exception 'Administrators cannot suspend themselves';
+  end if;
+  if exists (select 1 from public.profiles where id = target_user_id and role = 'admin'::public.user_role) and target_status = 'suspended' then
+    raise exception 'Administrator accounts cannot be suspended';
+  end if;
+
   update public.profiles
   set status = target_status,
       updated_at = now()
   where id = target_user_id;
+
+  if not found then raise exception 'User profile not found'; end if;
 
   return jsonb_build_object('success', true);
 end;
@@ -630,11 +729,25 @@ begin
     raise exception 'Unauthorized: Admin role required';
   end if;
 
+  if target_role not in ('user', 'admin') then
+    raise exception 'Invalid user role';
+  end if;
+  if target_user_id = auth.uid() and target_role <> 'admin' then
+    raise exception 'Administrators cannot demote themselves';
+  end if;
+  if target_role = 'user'
+     and exists (select 1 from public.profiles where id = target_user_id and role = 'admin'::public.user_role)
+     and (select count(*) from public.profiles where role = 'admin'::public.user_role) <= 1 then
+    raise exception 'Cannot demote the last administrator';
+  end if;
+
   update public.profiles
   set role = target_role::user_role,
       preset_avatar = case when target_role = 'admin' then 'shield' else preset_avatar end,
       updated_at = now()
   where id = target_user_id;
+
+  if not found then raise exception 'User profile not found'; end if;
 
   return jsonb_build_object('success', true);
 end;
@@ -671,6 +784,13 @@ $$;
 revoke all on function public.set_user_supporter_status(uuid, boolean) from public;
 grant execute on function public.set_user_supporter_status(uuid, boolean) to authenticated;
 
+revoke all on function public.get_platform_stats() from public, anon;
+grant execute on function public.get_platform_stats() to authenticated;
+revoke all on function public.set_user_status(uuid, text) from public, anon;
+grant execute on function public.set_user_status(uuid, text) to authenticated;
+revoke all on function public.set_user_role(uuid, text) from public, anon;
+grant execute on function public.set_user_role(uuid, text) to authenticated;
+
 -- ==============================================================================
 -- 15. AUDIT LOGS TABLE & TRIGGER AUTOMATION
 -- ==============================================================================
@@ -699,14 +819,41 @@ create policy "Admins can view all audit logs"
   using (public.is_admin());
 
 drop policy if exists "Authenticated and anonymous users can insert audit logs" on public.audit_logs;
-create policy "Authenticated and anonymous users can insert audit logs"
-  on public.audit_logs for insert
-  with check (true);
+revoke insert on public.audit_logs from anon, authenticated;
 
 drop policy if exists "Admins can delete/prune audit logs" on public.audit_logs;
 create policy "Admins can delete/prune audit logs"
   on public.audit_logs for delete
   using (public.is_admin());
+
+alter table public.audit_logs add column if not exists metadata jsonb default '{}'::jsonb not null;
+
+create or replace function public.log_user_activity(activity_action text, activity_target text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  actor_email text;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+  if activity_action !~ '^[a-z][a-z0-9_]{1,63}$' then
+    raise exception 'Invalid activity action';
+  end if;
+  if char_length(activity_target) > 1000 then
+    raise exception 'Activity target is too long';
+  end if;
+
+  select email into actor_email from public.profiles where id = auth.uid();
+  insert into public.audit_logs (user_id, user_email, action, target, metadata)
+  values (auth.uid(), coalesce(actor_email, 'unknown'), activity_action, activity_target, '{}'::jsonb);
+end;
+$$;
+
+revoke all on function public.log_user_activity(text, text) from public, anon;
+grant execute on function public.log_user_activity(text, text) to authenticated;
 
 -- ==============================================================================
 -- 16. SYSTEM SETTINGS & PLATFORM GOVERNANCE TABLE
@@ -764,22 +911,28 @@ create policy "Admins can insert system settings"
 
 -- Create public bucket for feedback screenshot attachments if storage schema is accessible
 insert into storage.buckets (id, name, public)
-values ('feedback-attachments', 'feedback-attachments', true)
-on conflict (id) do update set public = true;
+values ('feedback-attachments', 'feedback-attachments', false)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = 5242880,
+  allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp'];
 
 -- Storage bucket RLS policies for feedback-attachments
 drop policy if exists "Public Access for Feedback Attachments" on storage.objects;
-create policy "Public Access for Feedback Attachments"
-  on storage.objects for select
-  using (bucket_id = 'feedback-attachments');
-
 drop policy if exists "Anyone can upload feedback attachments" on storage.objects;
-create policy "Anyone can upload feedback attachments"
+drop policy if exists "Authenticated users upload own feedback attachments" on storage.objects;
+create policy "Authenticated users upload own feedback attachments"
   on storage.objects for insert
-  with check (bucket_id = 'feedback-attachments');
+  to authenticated
+  with check (
+    public.is_active_user()
+    and bucket_id = 'feedback-attachments'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 drop policy if exists "Admins can manage feedback attachments" on storage.objects;
 create policy "Admins can manage feedback attachments"
-  on storage.objects for all
+  on storage.objects for select
+  to authenticated
   using (bucket_id = 'feedback-attachments' and public.is_admin());
 

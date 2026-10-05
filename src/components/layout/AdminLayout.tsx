@@ -6,14 +6,15 @@ import {
   Database, 
   Activity, 
   Sliders, 
-  ArrowLeft, 
   LogOut,
   ShieldAlert,
   MessageSquare,
   Heart,
   Menu,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
+import { adminService } from '../../services/adminService';
 import { mockAuth, useCurrentUser } from '../../services/mockAuth';
 import { Avatar } from '../ui/Avatar';
 import { Logo } from '../ui/Logo';
@@ -23,6 +24,15 @@ export const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
   const user = useCurrentUser();
   const [isNavOpen, setIsNavOpen] = React.useState(false);
+  const [isMaintenanceActive, setIsMaintenanceActive] = React.useState(
+    () => adminService.getSystemSettingsSync().maintenance_mode
+  );
+
+  React.useEffect(() => {
+    return adminService.onSettingsChange((settings) => {
+      setIsMaintenanceActive(settings.maintenance_mode);
+    });
+  }, []);
 
   const handleLogout = () => {
     mockAuth.logout();
@@ -70,14 +80,7 @@ export const AdminLayout: React.FC = () => {
             </Link>
           )}
 
-          <Link 
-            to="/" 
-            className="flex items-center gap-1 text-ink-soft hover:text-ink transition-colors"
-            title="View public site"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            view_site()
-          </Link>
+
           <button
             type="button"
             onClick={() => setIsNavOpen((open) => !open)}
@@ -89,6 +92,20 @@ export const AdminLayout: React.FC = () => {
           </button>
         </div>
       </nav>
+      {isMaintenanceActive && (
+        <div className="bg-signal/10 border-b border-signal text-signal px-4 sm:px-8 py-2 font-mono text-xs flex items-center justify-between z-20 shrink-0">
+          <div className="flex items-center gap-2 font-bold">
+            <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse" />
+            <span>[!] MAINTENANCE MODE ACTIVE: Non-administrator access to workspace routes is frozen.</span>
+          </div>
+          <Link
+            to="/admin/system"
+            className="underline hover:text-ink transition-colors font-bold uppercase text-[11px]"
+          >
+            manage_settings()
+          </Link>
+        </div>
+      )}
 
       {/* Main split grid */}
       <div className="flex-1 flex overflow-hidden">

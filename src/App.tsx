@@ -16,6 +16,9 @@ import { TermsOfService } from './pages/TermsOfService';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
 import { ServerError } from './pages/ServerError';
+import { Maintenance } from './pages/Maintenance';
+import { Deactivated } from './pages/Deactivated';
+import { adminService } from './services/adminService';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { useCurrentUser, useAuthSession } from './services/mockAuth';
 import { authService } from './services/authService';
@@ -67,6 +70,14 @@ const AuthRedirectHandler: React.FC = () => {
 // Route Guard to protect workspace pages (normal users only)
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuthSession();
+  const [platformSettings, setPlatformSettings] = useState(() => adminService.getSystemSettingsSync());
+
+  useEffect(() => {
+    void adminService.getSystemSettings().then((s) => setPlatformSettings(s));
+    const unsubscribe = adminService.onSettingsChange((s) => setPlatformSettings(s));
+    return unsubscribe;
+  }, []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center font-mono text-sm text-ink-muted">
@@ -83,6 +94,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   // Admins do not have a user workspace; route directly to admin portal
   if (user.role === 'admin') {
     return <Navigate to="/admin" replace />;
+  }
+  // Deactivated / Suspended accounts guard
+  if (user.status === 'suspended') {
+    return <Navigate to="/deactivated" replace />;
+  }
+  // Maintenance mode guard: blocks standard users when maintenance mode is active
+  if (platformSettings.maintenance_mode) {
+    return <Navigate to="/maintenance" replace />;
   }
   return <>{children}</>;
 };
@@ -371,6 +390,10 @@ function App() {
             <Route path="/admin/activity" element={<AdminActivity />} />
             <Route path="/admin/system" element={<AdminSystem />} />
           </Route>
+
+          {/* Maintenance & Account Governance Pages */}
+          <Route path="/maintenance" element={<Maintenance />} />
+          <Route path="/deactivated" element={<Deactivated />} />
 
           {/* Security and Error Pages */}
           <Route path="/403" element={<Forbidden />} />

@@ -1,4 +1,8 @@
 import { type Diagram } from '../services/mockDb';
+import { parseAndValidateDiagramContent } from './diagramSecurity';
+
+const MAX_ENCODED_SHARE_LENGTH = 256 * 1024;
+const DIAGRAM_TYPES = new Set<Diagram['type']>(['blank', 'erd', 'flowchart', 'sequence', 'class', 'gantt', 'dfd', 'usecase', 'activity']);
 
 export interface SharePayload {
   id: string;
@@ -101,6 +105,10 @@ export const decodeSharePayload = (encoded: string): SharePayload | null => {
   try {
     const cleanEncoded = encoded.replace(/^#d=/, '').trim();
     if (!cleanEncoded) return null;
+    if (cleanEncoded.length > MAX_ENCODED_SHARE_LENGTH) {
+      console.warn('[shareUtils] Rejected oversized share payload.');
+      return null;
+    }
 
     const binary = atob(cleanEncoded);
     const bytes = new Uint8Array(binary.length);
@@ -110,13 +118,24 @@ export const decodeSharePayload = (encoded: string): SharePayload | null => {
     const decodedJson = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(decodedJson);
 
-    if (!parsed || !parsed.title || !parsed.type) {
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.title !== 'string' || !parsed.title.trim() || parsed.title.length > 200 || !DIAGRAM_TYPES.has(parsed.type)) {
       console.warn('[shareUtils] Decoded payload missing required fields:', { hasTitle: !!parsed?.title, hasType: !!parsed?.type });
       return null;
     }
 
+    const validatedContent = parseAndValidateDiagramContent(parsed.content);
+    if (!validatedContent.ok) {
+      console.warn('[shareUtils] Rejected unsafe diagram content:', validatedContent.error);
+      return null;
+    }
+
     console.log('[shareUtils] Successfully decoded payload:', { title: parsed.title, type: parsed.type, contentLength: parsed.content?.length });
-    return parsed as SharePayload;
+    return {
+      id: typeof parsed.id === 'string' && /^[a-zA-Z0-9_.:-]{1,200}$/.test(parsed.id) ? parsed.id : 'shared-diagram',
+      title: parsed.title.trim(),
+      type: parsed.type,
+      content: JSON.stringify(validatedContent.value),
+    } as SharePayload;
   } catch (err) {
     console.warn('[shareUtils] Failed to decode share payload from hash:', err);
     return null;

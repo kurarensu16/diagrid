@@ -187,18 +187,19 @@
 /* Canvas styling */
 .canvas-port {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--color-blueprint);
-  border: 1px solid var(--text-ink);
+  border: 1.5px solid #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-  z-index: 40;
+  z-index: 50;
   cursor: crosshair;
-  opacity: 0;
+  opacity: 1;
   pointer-events: auto;
 }
 
@@ -229,19 +230,19 @@
 /* Specific port positions for all shapes */
 .port-top {
   top: -20px;
-  left: calc(50% - 7px);
+  left: calc(50% - 8px);
 }
 .port-bottom {
   bottom: -20px;
-  left: calc(50% - 7px);
+  left: calc(50% - 8px);
 }
 .port-left {
   left: -20px;
-  top: calc(50% - 7px);
+  top: calc(50% - 8px);
 }
 .port-right {
   right: -20px;
-  top: calc(50% - 7px);
+  top: calc(50% - 8px);
 }
 
 

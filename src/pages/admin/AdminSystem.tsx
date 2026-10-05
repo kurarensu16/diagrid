@@ -74,6 +74,24 @@ export const AdminSystem: React.FC = () => {
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
+  const handleBackupConfig = async () => {
+    try {
+      const { filename, json } = await adminService.backupSystemConfig();
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`System snapshot downloaded as ${filename}`);
+    } catch (err: any) {
+      showToast(`Backup failed: ${err.message}`);
+    }
+  };
+
   const loadAll = async () => {
     setIsLoading(true);
     try {
@@ -312,6 +330,14 @@ export const AdminSystem: React.FC = () => {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             ping_supabase()
+          </button>
+          <button
+            onClick={handleBackupConfig}
+            className="flex items-center gap-1.5 font-mono text-[11px] border border-line px-3 py-1.5 hover:border-ink hover:bg-paper-raised transition-colors cursor-pointer"
+            title="Download JSON snapshot of system settings and configuration"
+          >
+            <FileDown className="w-3.5 h-3.5 text-blueprint" />
+            backup_config()
           </button>
           <div className="font-mono text-[12px] flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${systemHealth.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />

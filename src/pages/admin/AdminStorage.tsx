@@ -44,11 +44,12 @@ export const AdminStorage: React.FC = () => {
   const handlePruneLogs = async () => {
     setIsPruning(true);
     try {
-      const res = await adminService.pruneAuditLogs(30);
+      const retentionDays = adminService.getSystemSettingsSync().audit_retention_days ?? 30;
+      const res = await adminService.pruneAuditLogs(retentionDays);
       if (res.error) {
         showNotice(`Pruning failed: ${res.error}`);
       } else {
-        showNotice('Successfully pruned audit log entries older than 30 days.');
+        showNotice(`Successfully pruned ${res.count ?? 0} audit log entries older than ${retentionDays} days.`);
         await loadTelemetry();
       }
     } finally {
@@ -302,8 +303,8 @@ export const AdminStorage: React.FC = () => {
         onClose={() => setPruneModalOpen(false)}
         onConfirm={handlePruneLogs}
         title="PRUNE_AUDIT_LOGS"
-        message="Prune audit event logs older than 30 days?"
-        description="This will permanently delete historical audit log records older than 30 days to free up PostgreSQL storage. Active user projects and diagrams will NOT be affected."
+        message={`Prune audit event logs older than ${adminService.getSystemSettingsSync().audit_retention_days ?? 30} days?`}
+        description={`This will permanently delete historical audit log records older than ${adminService.getSystemSettingsSync().audit_retention_days ?? 30} days to free up PostgreSQL storage. Active user projects and diagrams will NOT be affected.`}
         confirmText="Confirm Prune"
       />
     </div>

@@ -14,6 +14,8 @@ export interface AuthUser {
   gridStyle?: 'lines' | 'dots' | 'blank';
   snapToGrid?: boolean;
   isSupporter?: boolean;
+  is_supporter?: boolean;
+  status?: 'active' | 'suspended';
 }
 
 const STORAGE_KEY = 'diagrid_auth_user';
@@ -96,6 +98,7 @@ const fetchProfile = async (
           theme: currentSavedTheme,
           gridStyle: 'lines',
           snapToGrid: true,
+          status: 'active',
         };
         setCachedUser(fallbackUser);
         return fallbackUser;
@@ -130,6 +133,8 @@ const fetchProfile = async (
         gridStyle: profile.grid_style || 'lines',
         snapToGrid: profile.snap_to_grid ?? true,
         isSupporter: !!profile.is_supporter,
+        is_supporter: !!profile.is_supporter,
+        status: (profile.status as 'active' | 'suspended') || 'active',
       };
 
       setCachedUser(resolvedUser);
@@ -206,6 +211,11 @@ export const authService = {
     }
 
     const user = await fetchProfile(data.user.id, data.user.email || email);
+    if (user.status === 'suspended') {
+      await supabase.auth.signOut();
+      setCachedUser(null);
+      return { user: null, error: 'This developer account has been deactivated or archived by an administrator. Please contact support.' };
+    }
     setCachedUser(user);
 
     // Record audit trail event asynchronously

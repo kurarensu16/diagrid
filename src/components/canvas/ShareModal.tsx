@@ -3,6 +3,7 @@ import { Button } from '../ui/Button';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../../services/mockDb';
 import { type FreehandDrawing } from '../../utils/diagramExport';
 import { encodeSharePayload } from '../../utils/shareUtils';
+import { adminService } from '../../services/adminService';
 import {
   X,
   Copy,
@@ -45,6 +46,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   if (!isOpen || !diagram) return null;
 
   const origin = window.location.origin;
+  const isPublicSharingEnabled = adminService.getSystemSettingsSync().public_sharing;
 
   // Build resilient payload with current live canvas state
   const contentPayload = (nodes.length > 0 || edges.length > 0 || drawings.length > 0)
@@ -129,6 +131,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {!isPublicSharingEnabled && (
+          <div className="bg-signal/10 border-b-2 border-signal p-3 px-6 font-mono text-[12px] text-signal flex items-center gap-2">
+            <span className="font-bold">[!] PUBLIC SHARING IS CURRENTLY DISABLED</span>
+            <span className="text-ink-soft hidden sm:inline">- Shared URLs and embeds are blocked platform-wide by administrators.</span>
+          </div>
+        )}
 
         {/* Modal Tab Navigation */}
         <div className="h-11 border-b-2 border-ink flex bg-paper-raised font-mono text-[12px] select-none">

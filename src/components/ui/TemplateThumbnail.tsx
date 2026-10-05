@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import type { Diagram, CanvasNode, CanvasEdge } from '../../services/mockDb';
 import { getNodeDimensions, type FreehandDrawing } from '../../utils/diagramExport';
+import { parseDfdStoreLabel, parseDfdProcessLabel } from '../../utils/dfdHelpers';
 
 export interface TemplateThumbnailProps {
   content: string;
@@ -354,9 +355,9 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
 
             // 9. DFD Process (Gane-Sarson with Top ID Header)
             if (node.type === 'dfd-process') {
-              const splitIdx = node.label.indexOf(' ');
-              const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
-              const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+              const { id: processId, name: processName } = parseDfdProcessLabel(node.label);
+
+
 
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
@@ -385,14 +386,19 @@ export const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({
 
             // 10. DFD Data Store (Open-ended parallel lines)
             if (node.type === 'dfd-store') {
+              const { id: storeId, name: storeName } = parseDfdStoreLabel(node.label);
+              const idWidth = 28;
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
                   <rect x="0" y="0" width={width} height={height} fill="#F1F4F1" />
-                  <line x1="0" y1="0" x2={width} y2="0" stroke="#15191C" strokeWidth="2" />
-                  <line x1="0" y1={height} x2={width} y2={height} stroke="#15191C" strokeWidth="2" />
-                  <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill="#15191C" fontSize="8.5" fontFamily="monospace" fontWeight="bold">
-                    [D] {node.label}
-                  </text>
+                  <rect x="0" y="0" width={idWidth} height={height} fill="#E1E5E3" />
+                  <path d={`M ${width} 0 L 0 0 L 0 ${height} L ${width} ${height}`} fill="none" stroke="#15191C" strokeWidth={strokeWidth} />
+                  <line x1={idWidth} y1="0" x2={idWidth} y2={height} stroke="#15191C" strokeWidth={strokeWidth} />
+
+                  <text x={idWidth / 2} y={height / 2 + 3} textAnchor="middle" fill="#5A666E" fontSize="7.5" fontFamily="monospace" fontWeight="bold">{storeId}</text>
+                  <text x={idWidth + 6} y={height / 2 + 3} textAnchor="start" fill="#15191C" fontSize="8" fontFamily="monospace" fontWeight="bold">{storeName}</text>
+
+
                 </g>
               );
             }

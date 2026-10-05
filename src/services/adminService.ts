@@ -152,6 +152,16 @@ export interface StorageTelemetry {
   totalUsers: number;
 }
 
+const settingsListeners: Set<(settings: PlatformSettings) => void> = new Set();
+
+const notifySettingsListeners = (settings: PlatformSettings) => {
+  settingsListeners.forEach((listener) => {
+    try {
+      listener(settings);
+    } catch {}
+  });
+};
+
 export const adminService = {
   /**
    * Check if Supabase connection is configured
@@ -228,27 +238,11 @@ export const adminService = {
     }
 
     try {
-      // First attempt using secure RPC function
       const { error: rpcError } = await supabase.rpc('set_user_status', {
         target_user_id: userId,
         target_status: status,
       });
-
-      if (!rpcError) return {};
-
-      // Direct fallback update on public.profiles
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', userId);
-
-      if (updateError) throw updateError;
-
-      await adminService.logActivity(
-        'updated_user_status',
-        `Set status of user ${userId} to ${status}`
-      );
-
+      if (rpcError) throw rpcError;
       return {};
     } catch (err: any) {
       console.error('[adminService] setUserStatus error:', err.message);
@@ -265,31 +259,16 @@ export const adminService = {
     }
 
     try {
-      // First attempt using secure RPC function
       const { error: rpcError } = await supabase.rpc('set_user_role', {
         target_user_id: userId,
         target_role: role,
       });
-
-      if (!rpcError) return {};
-
-      // Direct fallback update on public.profiles
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
-          role,
-          preset_avatar: role === 'admin' ? 'shield' : 'terminal',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
-
-      if (updateError) throw updateError;
+      if (rpcError) throw rpcError;
 
       await adminService.logActivity(
-        'updated_user_role',
-        `Set role of user ${userId} to ${role}`
+        role === 'admin' ? 'promoted_admin' : 'demoted_admin',
+        `${role === 'admin' ? 'Promoted' : 'Demoted'} user ${userId} to ${role.toUpperCase()}`
       );
-
       return {};
     } catch (err: any) {
       console.error('[adminService] setUserRole error:', err.message);
@@ -334,14 +313,48 @@ export const adminService = {
     }
 
     try {
-      const { error } = await supabase
+      const activeUser = authService.getUserSync();
+      if (activeUser?.id === userId) {
+        return { error: 'Administrators cannot delete their own account.' };
+      }
+
+      // Check if target is admin and if last remaining admin
+      const { data: targetProfile } = await supabase
+        .from('profiles')
+        .select('role, email')
+        .eq('id', userId)
+        .single();
+
+      if (targetProfile?.role === 'admin') {
+        const { count } = await supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('role', 'admin');
+
+        if ((count || 0) <= 1) {
+          return { error: 'Cannot delete the last remaining administrator account.' };
+        }
+      }
+
+      // Clean up owned diagrams and projects
+      // Soft-delete: suspend account to block all access via RLS policies
+      const statusRes = await adminService.setUserStatus(userId, 'suspended');
+      if (statusRes.error) return statusRes;
+
+      // Revoke supporter perks if active
+      await adminService.setUserSupporterStatus(userId, false);
+
+
+      // Profile deletion skipped (soft-delete preserves data)
+      const error = null;
+      /*
         .from('profiles')
         .delete()
-        .eq('id', userId);
+        .eq('id', userId); */
 
       if (error) throw error;
 
-      await adminService.logActivity('deleted_user', `Deleted profile ${userId}`);
+      await adminService.logActivity('archived_user', `Archived (soft-deleted) user ${targetProfile?.email || userId}. Data preserved.`);
       return {};
     } catch (err: any) {
       console.error('[adminService] deleteUser error:', err.message);
@@ -573,23 +586,17 @@ export const adminService = {
   /**
    * Logs a platform event to Supabase.
    */
-  logActivity: async (action: string, target: string, userEmail?: string): Promise<void> => {
+  logActivity: async (action: string, target: string, _userEmail?: string): Promise<void> => {
     if (!isSupabaseConfigured()) return;
 
     try {
-      const activeUser = authService.getUserSync();
-      const email = userEmail || activeUser?.email || 'admin@diagrid.dev';
-
-      const { error } = await supabase.from('audit_logs').insert({
-        user_id: activeUser?.id || null,
-        user_email: email,
-        action,
-        target,
-        created_at: new Date().toISOString(),
+      const { error } = await supabase.rpc('log_user_activity', {
+        activity_action: action,
+        activity_target: target,
       });
 
       if (error) {
-        console.warn('[adminService] logActivity insert error:', error.message);
+        console.warn('[adminService] logActivity RPC error:', error.message);
       }
     } catch (e: any) {
       console.warn('[adminService] logActivity exception:', e.message);
@@ -791,6 +798,20 @@ export const adminService = {
         return [];
       }
 
+      const signedAttachmentUrls = new Map<string, string>();
+      await Promise.all(data.map(async (item) => {
+        const storedValue = item.attachment_url as string | null;
+        if (!storedValue) return;
+        const marker = '/feedback-attachments/';
+        const objectPath = storedValue.includes(marker)
+          ? decodeURIComponent(storedValue.split(marker)[1].split('?')[0])
+          : storedValue;
+        const { data: signed } = await supabase.storage
+          .from('feedback-attachments')
+          .createSignedUrl(objectPath, 60 * 60);
+        if (signed?.signedUrl) signedAttachmentUrls.set(item.id, signed.signedUrl);
+      }));
+
       return data.map((item) => ({
         id: item.id,
         timestamp: item.created_at,
@@ -801,7 +822,7 @@ export const adminService = {
         message: item.message,
         pageUrl: item.page_url || undefined,
         clientMetadata: item.client_metadata || undefined,
-        attachmentUrl: item.attachment_url || undefined,
+        attachmentUrl: signedAttachmentUrls.get(item.id),
         priority: (item.priority as 'low' | 'medium' | 'high' | 'critical') || 'medium',
         adminNotes: item.admin_notes || '',
         status: (item.status as 'new' | 'reviewed' | 'resolved') || 'new',
@@ -865,26 +886,31 @@ export const adminService = {
       return { error: 'Supabase is not configured' };
     }
 
+    const user = authService.getUserSync();
+    if (!user) return { error: 'Sign in to attach a screenshot.' };
+    const allowedTypes: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+    };
+    if (!allowedTypes[file.type]) return { error: 'Only PNG, JPEG, and WebP screenshots are allowed.' };
+    if (file.size > 5 * 1024 * 1024) return { error: 'Screenshot exceeds the 5 MB limit.' };
+
     try {
-      const fileExt = file instanceof File ? file.name.split('.').pop() || 'png' : 'png';
-      const fileName = `feedback_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-      const filePath = `screenshots/${fileName}`;
+      const fileName = `${crypto.randomUUID()}.${allowedTypes[file.type]}`;
+      const filePath = `${user.id}/screenshots/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('feedback-attachments')
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: true,
-          contentType: file.type || 'image/png'
+          upsert: false,
+          contentType: file.type
         });
 
       if (uploadError) throw uploadError;
 
-      const { data: publicUrlData } = supabase.storage
-        .from('feedback-attachments')
-        .getPublicUrl(filePath);
-
-      return { url: publicUrlData.publicUrl };
+      return { url: filePath };
     } catch (err: any) {
       console.error('[adminService] uploadFeedbackAttachment error:', err.message);
       return { error: err.message || 'Failed to upload screenshot attachment' };
@@ -922,10 +948,6 @@ export const adminService = {
         client_metadata: feedback.clientMetadata || {},
         attachment_url: feedback.attachmentUrl || null,
         priority: feedback.priority || (feedback.type === 'bug' && feedback.rating <= 2 ? 'high' : 'medium'),
-        admin_notes: '',
-        status: 'new',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       });
 
       if (error) throw error;
@@ -1165,30 +1187,54 @@ export const adminService = {
   /**
    * Prunes audit logs older than the specified number of days to conserve database storage.
    */
-  pruneAuditLogs: async (daysOld: number = 30): Promise<{ error?: string }> => {
+  pruneAuditLogs: async (daysOld?: number): Promise<{ count?: number; error?: string }> => {
     if (!isSupabaseConfigured()) {
       return { error: 'Supabase is not configured' };
     }
 
     try {
-      const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000).toISOString();
-      const { error } = await supabase
+      const days = daysOld ?? adminService.getSystemSettingsSync().audit_retention_days ?? 30;
+      const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
         .from('audit_logs')
         .delete()
-        .lt('created_at', cutoffDate);
+        .lt('created_at', cutoffDate)
+        .select('id');
 
       if (error) throw error;
 
       await adminService.logActivity(
         'pruned_audit_logs',
-        `Cleaned audit logs older than ${daysOld} days`
+        `Pruned ${data ? data.length : 0} audit logs older than ${days} days`
       );
 
-      return {};
+      return { count: data ? data.length : 0 };
     } catch (err: any) {
       console.error('[adminService] pruneAuditLogs error:', err.message);
       return { error: err.message || 'Failed to prune audit logs' };
     }
+  },
+
+  /**
+   * Generates a downloadable JSON snapshot of all system configuration.
+   */
+  backupSystemConfig: async (): Promise<{ filename: string; json: string }> => {
+    const settings = await adminService.getSystemSettings();
+    const systemStatus = await adminService.getSystemStatus();
+    const activeBroadcast = adminService.getBroadcastNotice();
+
+    const snapshot = {
+      schema: 'diagrid_system_backup_v1',
+      exported_at: new Date().toISOString(),
+      platform: 'Diagrid Studio Platform Administration Engine',
+      settings,
+      activeBroadcast,
+      systemStatus,
+    };
+
+    const json = JSON.stringify(snapshot, null, 2);
+    const filename = `diagrid_config_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    return { filename, json };
   },
 
   // ==========================================
@@ -1343,6 +1389,7 @@ export const adminService = {
 
       try {
         localStorage.setItem('diagrid_platform_settings', JSON.stringify(merged));
+        notifySettingsListeners(merged);
       } catch {}
 
       return merged;
@@ -1363,6 +1410,7 @@ export const adminService = {
       const base = existing ? JSON.parse(existing) : {};
       const merged = { ...base, ...updates };
       localStorage.setItem('diagrid_platform_settings', JSON.stringify(merged));
+      notifySettingsListeners(merged);
     } catch {}
 
     if (!isSupabaseConfigured()) {
@@ -1402,6 +1450,48 @@ export const adminService = {
       // Fallback succeeds via localStorage
       return {};
     }
+  },
+
+  /**
+   * Synchronously reads cached platform settings.
+   */
+  getSystemSettingsSync: (): PlatformSettings => {
+    const defaultSettings: PlatformSettings = {
+      id: 'current',
+      maintenance_mode: false,
+      registration_policy: 'open',
+      max_projects_per_user: 10,
+      public_sharing: true,
+      pdf_export: false,
+      audit_retention_days: 30,
+      creator_wallets_enabled: true,
+      creator_wallet_name: 'GCash',
+      creator_wallet_account: '',
+      creator_wallet_qr_url: '',
+      creator_wallets: [
+        { id: 'w-1', name: 'GCash', account_name: '', account_number: '', qr_url: '', enabled: true },
+        { id: 'w-2', name: 'Maya', account_name: '', account_number: '', qr_url: '', enabled: true },
+      ],
+      github_repo_url: 'https://github.com/kurarensu16/diagrid',
+      updated_at: new Date().toISOString(),
+      updated_by: 'system',
+    };
+
+    if (typeof window === 'undefined') return defaultSettings;
+    try {
+      const raw = localStorage.getItem('diagrid_platform_settings');
+      return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
+    } catch {
+      return defaultSettings;
+    }
+  },
+
+  /**
+   * Subscribes to real-time changes to platform governance settings.
+   */
+  onSettingsChange: (callback: (settings: PlatformSettings) => void): (() => void) => {
+    settingsListeners.add(callback);
+    return () => settingsListeners.delete(callback);
   },
 
   // ==========================================
