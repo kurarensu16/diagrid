@@ -17,6 +17,7 @@ Implemented locally on 2026-10-05:
 - Added grouped weekly Dependabot configuration for npm and GitHub Actions.
 - Added explicit typecheck and database-security package scripts.
 - Repaired the offline-sync test harness after the project quota service dependency changed.
+- Made the Phase 1 migration compatible with older hosted schemas by creating and backfilling `profiles.status` before suspension-aware functions and policies are installed. This was identified by the first staging/remote deployment attempt, which rolled back before applying Phase 1.
 
 Verified locally:
 

@@ -51,6 +51,7 @@ Files:
 Changes:
 
 - Added `public.is_active_user()` as a security-definer authorization helper.
+- The deployment migration creates and backfills `profiles.status` for hosted databases that predate account suspension support.
 - Project and diagram read/write policies now require an active user, while administrators remain operational.
 - User-owned storage writes also require an active account.
 - Status RPC input is restricted to `active` or `suspended`.
