@@ -69,6 +69,7 @@ Changes:
 
 - Removed direct-table fallbacks from role and status updates.
 - Failed RPC authorization now produces an error instead of attempting another mutation path.
+- The deployment migration creates the admin statistics RPC when upgrading a legacy database that does not already have it.
 - Role values are validated by the database.
 - Administrators cannot demote themselves.
 - The final administrator cannot be demoted.

@@ -18,6 +18,7 @@ Implemented locally on 2026-10-05:
 - Added explicit typecheck and database-security package scripts.
 - Repaired the offline-sync test harness after the project quota service dependency changed.
 - Made the Phase 1 migration compatible with older hosted schemas by creating and backfilling `profiles.status` before suspension-aware functions and policies are installed. This was identified by the first staging/remote deployment attempt, which rolled back before applying Phase 1.
+- Added the missing `get_platform_stats()` RPC for legacy deployments before its execution grants are restricted. The second compatibility attempt also rolled back before applying Phase 1.
 
 Verified locally:
 

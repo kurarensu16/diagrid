@@ -1,7 +1,23 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(15);
+select plan(17);
+
+select ok(
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'status'
+      and is_nullable = 'NO'
+  ),
+  'profiles has the required non-null account status column'
+);
+select ok(
+  to_regprocedure('public.get_platform_stats()') is not null,
+  'legacy deployments receive the admin platform statistics RPC'
+);
 
 -- Stable identities make failures easier to reproduce and inspect.
 insert into auth.users (
