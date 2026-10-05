@@ -452,8 +452,8 @@ export const Landing: React.FC = () => {
         {/* Left text column */}
         <div className="p-8 sm:p-12 lg:p-20 border-b-2 lg:border-b-0 lg:border-r-2 border-ink flex flex-col justify-center bg-paper">
           <h1 className="text-[40px] sm:text-[48px] lg:text-[54px] leading-[1.06] font-bold tracking-tight mb-5 text-ink">
-            Draw neat diagrams <span className="text-blueprint underline decoration-2 underline-offset-4">in seconds</span>.<br />
-            No tangled lines.
+            Draw clean technical diagrams.<br />
+            <span className="text-blueprint underline decoration-2 underline-offset-4">Or generate them from code.</span>
           </h1>
 
           <p className="text-[15.5px] sm:text-[16.5px] text-[#2C3439] leading-relaxed max-w-[490px] mb-8 font-sans font-medium">

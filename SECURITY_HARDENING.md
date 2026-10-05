@@ -1,7 +1,7 @@
 # Diagrid Security Hardening Record
 
 Last updated: 2026-10-05
-Implementation status: Phase 1 implemented locally; database migration still requires deployment to Supabase.
+Implementation status: Phase 1 deployed to the linked Supabase project and verified on 2026-10-05.
 
 ## Purpose
 
@@ -240,13 +240,24 @@ npm run build                     -> passed
 npm run lint                      -> passed with seven pre-existing warnings
 ```
 
+GitHub Actions also completed successfully for CI, CodeQL, dependency review,
+and the pgTAP database-security suite. Post-deployment checks against the linked
+Supabase project confirmed that migration `20260924000000` is recorded remotely,
+the required security functions and diagram constraint exist, diagram reads are
+limited to the owner/admin policy, direct client inserts into `audit_logs` are
+revoked, and the feedback attachment bucket is private with the expected MIME
+type and 5 MB limits.
+
 The production build retains the existing bundle-size warning for the main client chunk. The remaining lint warnings are existing React Fast Refresh and hook-dependency warnings outside this security change. The new pgTAP suite is checked in but could not run locally on 2026-10-05 because Docker Desktop was unavailable; it is configured to run in GitHub Actions.
 
-## Required deployment steps
+## Deployment record and operational checks
 
-The SQL migration has been created but has **not** been applied to a remote Supabase project from this workspace.
+`supabase/migrations/20260924000000_security_hardening_phase1.sql` was applied
+successfully to the linked Supabase project on 2026-10-05. The compatibility
+fixes for legacy `profiles.status` and `get_platform_stats()` schemas were
+included before the successful run.
 
-Before deployment:
+The following checks remain useful for release acceptance and periodic regression testing:
 
 1. Back up the production database and review current policies in the Supabase dashboard.
 2. Apply `supabase/migrations/20260924000000_security_hardening_phase1.sql` to staging.
@@ -260,7 +271,7 @@ Before deployment:
 10. Verify a suspended user cannot access project/diagram rows or upload files.
 11. Verify an authenticated user can submit an attachment and an administrator can view it through a signed URL.
 12. Verify direct inserts into `audit_logs` fail for `anon` and `authenticated`.
-13. Deploy the frontend only after the migration succeeds, because the new client expects `log_user_activity` and private attachment policies.
+13. Keep the frontend and database migration deployed together because the client expects `log_user_activity` and private attachment policies.
 
 ## Known remaining work
 
@@ -269,7 +280,7 @@ The implementation sequence for these items is maintained in
 
 The following items are intentionally not represented as complete:
 
-1. Add automated pgTAP/RLS tests under `supabase/tests` and run them in CI.
+1. Keep the automated pgTAP/RLS tests and CI security gates passing as policies evolve.
 2. Replace self-contained URL sharing with optional revocable, expiring, hashed share tokens for large/private diagrams.
 3. Add rate limiting and CAPTCHA/Turnstile to anonymous feedback, preferably through an Edge Function.
 4. Decode and re-encode uploaded raster images server-side to verify signatures and remove metadata.

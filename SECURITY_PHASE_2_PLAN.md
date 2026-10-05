@@ -1,18 +1,18 @@
 # Diagrid Security Hardening — Phase 2 Plan
 
 Plan date: 2026-10-05
-Status: In progress; PR 1 is implemented locally and awaiting CI/staging execution.
-Prerequisite: Phase 1 must be deployed and verified in staging before Phase 2 changes reach production.
+Status: In progress; PR 1 and the Phase 1 deployment are complete. PR 2 is next.
+Prerequisite: Satisfied on 2026-10-05 for the linked Supabase project.
 
 ## Current implementation record
 
-Implemented locally on 2026-10-05:
+Implemented on 2026-10-05:
 
 - Replaced the remaining sign-in audit-table insert with `log_user_activity`.
 - Removed the unused sample audit writer that bypassed the RPC boundary.
 - Added a reproducible baseline schema migration before the existing incremental migrations.
 - Added Supabase local configuration with an eight-character local password minimum, secure password changes, one-hour JWTs, and correct Vite redirect URLs.
-- Added 15 pgTAP assertions for RLS, grants, feedback restrictions, audit integrity, and diagram complexity limits.
+- Added 17 pgTAP assertions for RLS, grants, feedback restrictions, audit integrity, and diagram complexity limits.
 - Added application, database-security, CodeQL, and dependency-review GitHub Actions.
 - Added grouped weekly Dependabot configuration for npm and GitHub Actions.
 - Added explicit typecheck and database-security package scripts.
@@ -20,7 +20,7 @@ Implemented locally on 2026-10-05:
 - Made the Phase 1 migration compatible with older hosted schemas by creating and backfilling `profiles.status` before suspension-aware functions and policies are installed. This was identified by the first staging/remote deployment attempt, which rolled back before applying Phase 1.
 - Added the missing `get_platform_stats()` RPC for legacy deployments before its execution grants are restricted. The second compatibility attempt also rolled back before applying Phase 1.
 
-Verified locally:
+Verified locally and in CI:
 
 - Lint passed with seven existing warnings.
 - TypeScript passed.
@@ -28,12 +28,12 @@ Verified locally:
 - Production build passed.
 - Production dependency audit passed with zero vulnerabilities.
 - `git diff --check` passed.
+- GitHub Actions passed for CI, CodeQL, dependency review, and database-security tests.
+- Phase 1 migration `20260924000000` was applied successfully to the linked Supabase project.
+- Post-deployment checks confirmed the required functions, constraints, policies, grants, and private feedback bucket configuration.
 
-Pending verification and external configuration:
+Pending external configuration and follow-up:
 
-- Run the pgTAP suite in GitHub Actions or locally after Docker Desktop is available. The local Docker app launch approval timed out during this implementation turn.
-- Apply and verify the Phase 1 migration in staging.
-- Confirm the baseline migration against the linked Supabase migration history before the first remote `db push`; use `supabase migration list` and repair history rather than guessing if the hosted schema was created manually.
 - Enable branch protection, Dependabot security updates, secret scanning, and push protection in GitHub repository settings.
 - Review the newly published `braces` advisory. It currently has no patched release and is present only through Tailwind 3 build tooling; production dependencies are unaffected. Plan a Tailwind 4 migration or adopt a patched upstream release when available.
 
