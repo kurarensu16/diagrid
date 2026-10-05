@@ -8,24 +8,29 @@ interface Props {
   existingEdges: number;
   onApply: () => void;
   onCancel: () => void;
+  onDiagnosticSelect: (line: number, column: number) => void;
 }
 
-export function CodeImportPreview({ result, mode, existingNodes, existingEdges, onApply, onCancel }: Props) {
+export function CodeImportPreview({ result, mode, existingNodes, existingEdges, onApply, onCancel, onDiagnosticSelect }: Props) {
+  const hasErrors = result.nodes.length === 0 || result.diagnostics.some(item => item.severity === 'error');
   const bounds = result.nodes.map(node => ({ node, ...getNodeDimensions(node) }));
-  const left = Math.min(...bounds.map(({ node }) => node.x)) - 30;
-  const top = Math.min(...bounds.map(({ node }) => node.y)) - 30;
-  const right = Math.max(...bounds.map(({ node, width }) => node.x + width)) + 30;
-  const bottom = Math.max(...bounds.map(({ node, height }) => node.y + height)) + 30;
+  const left = bounds.length ? Math.min(...bounds.map(({ node }) => node.x)) - 30 : 0;
+  const top = bounds.length ? Math.min(...bounds.map(({ node }) => node.y)) - 30 : 0;
+  const right = bounds.length ? Math.max(...bounds.map(({ node, width }) => node.x + width)) + 30 : 1;
+  const bottom = bounds.length ? Math.max(...bounds.map(({ node, height }) => node.y + height)) + 30 : 1;
   const centers = new Map(bounds.map(({ node, width, height }) => [node.id, { x: node.x + width / 2, y: node.y + height / 2 }]));
 
   return (
     <div className="border-2 border-blueprint bg-paper p-2.5 space-y-2 text-[11px]">
-      <div className="font-bold text-ink">Review {mode === 'replace' ? 'replacement' : 'addition'}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-bold text-ink">Review {mode === 'replace' ? 'replacement' : 'addition'}</div>
+        <div className="text-[9px] uppercase tracking-wider font-bold text-blueprint">{result.syntax}</div>
+      </div>
       <div className="text-ink-soft">
         {result.nodes.length} shapes, {result.edges.length} connections
         {mode === 'replace' ? ` will replace ${existingNodes} shapes and ${existingEdges} connections.` : ' will be added to the canvas.'}
       </div>
-      <svg className="w-full h-36 border border-line bg-paper-raised" viewBox={`${left} ${top} ${Math.max(1, right - left)} ${Math.max(1, bottom - top)}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Preview of generated diagram">
+      {bounds.length > 0 ? <svg className="w-full h-36 border border-line bg-paper-raised" viewBox={`${left} ${top} ${Math.max(1, right - left)} ${Math.max(1, bottom - top)}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Preview of generated diagram">
         {result.edges.map(edge => {
           const source = centers.get(edge.source);
           const target = centers.get(edge.target);
@@ -39,17 +44,25 @@ export function CodeImportPreview({ result, mode, existingNodes, existingEdges, 
             </text>
           </g>
         ))}
-      </svg>
+      </svg> : <div className="h-20 border border-line bg-paper-raised flex items-center justify-center text-ink-soft">No shapes available to preview</div>}
       {result.diagnostics.length > 0 && (
         <div className="border border-signal bg-signal/10 p-2 text-signal">
-          <div className="font-bold">{result.diagnostics.length} line{result.diagnostics.length === 1 ? '' : 's'} skipped</div>
-          <ul className="mt-1 max-h-24 overflow-y-auto space-y-1">
-            {result.diagnostics.map(item => <li key={item.line}>Line {item.line}: {item.message} — <code>{item.source}</code></li>)}
+          <div className="font-bold">{result.diagnostics.length} source issue{result.diagnostics.length === 1 ? '' : 's'}</div>
+          <ul className="mt-1 max-h-28 overflow-y-auto space-y-1.5">
+            {result.diagnostics.map((item, index) => (
+              <li key={`${item.line}-${item.column}-${index}`}>
+                <button type="button" onClick={() => onDiagnosticSelect(item.line, item.column)} className="w-full text-left hover:underline cursor-pointer">
+                  <span className="font-bold uppercase">{item.severity}</span> L{item.line}:{item.column} — {item.message}
+                  {item.suggestion && <span className="block text-ink-soft">Suggestion: {item.suggestion}</span>}
+                  <code className="block truncate">{item.source.trim()}</code>
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       )}
       <div className="flex gap-2">
-        <button type="button" onClick={onApply} className="flex-1 bg-blueprint text-paper px-2 py-1.5 font-bold cursor-pointer">Apply {mode === 'replace' ? 'replacement' : 'addition'}</button>
+        <button type="button" onClick={onApply} disabled={hasErrors} className="flex-1 bg-blueprint text-paper px-2 py-1.5 font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{hasErrors ? 'Fix errors to apply' : `Apply ${mode === 'replace' ? 'replacement' : 'addition'}`}</button>
         <button type="button" onClick={onCancel} className="border border-ink px-2 py-1.5 text-ink cursor-pointer">Cancel</button>
       </div>
     </div>

@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { diagramService } from '../services/diagramService';
+import { adminService } from '../services/adminService';
 import { type Diagram, type CanvasNode, type CanvasEdge } from '../services/mockDb';
 import { type FreehandDrawing, getNodeDimensions } from '../utils/diagramExport';
 import { decodeSharePayload } from '../utils/shareUtils';
+import { parseAndValidateDiagramContent } from '../utils/diagramSecurity';
 import { calculateEdgePath, getEdgeLabelPosition } from '../utils/edgeRouting';
+import { parseDfdStoreLabel, parseDfdProcessLabel } from '../utils/dfdHelpers';
 import {
   ZoomIn,
   ZoomOut,
@@ -46,6 +49,10 @@ export const EmbedWidget: React.FC = () => {
   // Viewport State
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panRef = useRef(pan);
+  panRef.current = pan;
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
@@ -151,10 +158,11 @@ export const EmbedWidget: React.FC = () => {
 
         setDiagram(d);
         try {
-          const parsed = typeof d.content === 'string' ? JSON.parse(d.content) : d.content;
-          const parsedNodes: CanvasNode[] = parsed.nodes || [];
-          const parsedEdges: CanvasEdge[] = parsed.edges || [];
-          const parsedDrawings: FreehandDrawing[] = parsed.drawings || [];
+          const validation = parseAndValidateDiagramContent(d.content);
+          if (!validation.ok) throw new Error(validation.error);
+          const parsedNodes = validation.value.nodes as unknown as CanvasNode[];
+          const parsedEdges = validation.value.edges as unknown as CanvasEdge[];
+          const parsedDrawings = validation.value.drawings as unknown as FreehandDrawing[];
 
           setNodes(parsedNodes);
           setEdges(parsedEdges);
@@ -175,10 +183,11 @@ export const EmbedWidget: React.FC = () => {
         if (d) {
           setDiagram(d);
           try {
-            const parsed = typeof d.content === 'string' ? JSON.parse(d.content) : d.content;
-            const parsedNodes: CanvasNode[] = parsed.nodes || [];
-            const parsedEdges: CanvasEdge[] = parsed.edges || [];
-            const parsedDrawings: FreehandDrawing[] = parsed.drawings || [];
+            const validation = parseAndValidateDiagramContent(d.content);
+            if (!validation.ok) throw new Error(validation.error);
+            const parsedNodes = validation.value.nodes as unknown as CanvasNode[];
+            const parsedEdges = validation.value.edges as unknown as CanvasEdge[];
+            const parsedDrawings = validation.value.drawings as unknown as FreehandDrawing[];
 
             setNodes(parsedNodes);
             setEdges(parsedEdges);
@@ -232,39 +241,68 @@ export const EmbedWidget: React.FC = () => {
     setIsPanning(false);
   };
 
-  // Wheel Zoom & 2D Pan
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.2), 3);
+  // Native non-passive wheel listener attached to window
+  // Crucial: Listening on window with { passive: false } guarantees e.preventDefault() intercepts Ctrl+Scroll
+  // and completely blocks the browser from zooming the webpage, while smoothly zooming the canvas under the cursor.
+  useEffect(() => {
+    const onWindowWheel = (e: WheelEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
 
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
+      const rect = container.getBoundingClientRect();
+      const isOverContainer =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+
+      if (e.ctrlKey || e.metaKey) {
+        // ALWAYS prevent default browser zoom when Ctrl/Cmd is held
+        e.preventDefault();
+
+        if (!isOverContainer) return;
+
+        const currentZoom = zoomRef.current;
+        const currentPan = panRef.current;
+
+        // Smooth factor supporting both discrete mouse wheel notches (deltaY ~ 100) and trackpad pinch
+        const factor = Math.abs(e.deltaY) >= 50
+          ? (e.deltaY < 0 ? 1.1 : 0.9)
+          : Math.exp(-e.deltaY * 0.01);
+
+        const newZoom = Math.min(Math.max(Number((currentZoom * factor).toFixed(3)), 0.2), 3);
+
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        const newPanX = mouseX - (mouseX - pan.x) * (newZoom / zoom);
-        const newPanY = mouseY - (mouseY - pan.y) * (newZoom / zoom);
+        const newPanX = mouseX - (mouseX - currentPan.x) * (newZoom / currentZoom);
+        const newPanY = mouseY - (mouseY - currentPan.y) * (newZoom / currentZoom);
 
         setZoom(newZoom);
         setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
-      } else {
-        setZoom(newZoom);
+      } else if (isOverContainer) {
+        // 2D Pan Scroll over canvas container
+        e.preventDefault();
+        let deltaX = e.deltaX;
+        let deltaY = e.deltaY;
+        if (e.shiftKey && deltaX === 0) {
+          deltaX = deltaY;
+          deltaY = 0;
+        }
+        setPan(prev => ({
+          x: Math.round(prev.x - deltaX),
+          y: Math.round(prev.y - deltaY)
+        }));
       }
-    } else {
-      let deltaX = e.deltaX;
-      let deltaY = e.deltaY;
-      if (e.shiftKey && deltaX === 0) {
-        deltaX = deltaY;
-        deltaY = 0;
-      }
-      setPan(prev => ({
-        x: Math.round(prev.x - deltaX),
-        y: Math.round(prev.y - deltaY)
-      }));
-    }
-  };
+    };
+
+    window.addEventListener('wheel', onWindowWheel, { passive: false });
+    return () => {
+      window.removeEventListener('wheel', onWindowWheel);
+    };
+  }, []);
+
+  const handleWheel = useCallback((_e: React.WheelEvent) => {}, []);
 
   const isDark = themeParam === 'dark';
   const isWhite = themeParam === 'white';
@@ -274,6 +312,25 @@ export const EmbedWidget: React.FC = () => {
   if (isDark) bgClass = 'bg-[#15191C] text-paper';
   else if (isWhite) bgClass = 'bg-white text-ink';
   else if (isTransparent) bgClass = 'bg-transparent text-ink';
+
+  const isPublicSharingEnabled = adminService.getSystemSettingsSync().public_sharing;
+
+  if (!isPublicSharingEnabled) {
+    return (
+      <div className={`w-full h-screen ${bgClass} flex flex-col items-center justify-center font-mono p-4 text-center select-none`}>
+        <div className="text-[12px] font-bold text-signal mb-1">diagrid // embed_disabled</div>
+        <div className="text-[10px] text-ink-soft mb-3">Public embeds are currently disabled platform-wide by administrators.</div>
+        <a
+          href={window.location.origin}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] underline text-blueprint hover:text-ink font-bold"
+        >
+          open diagrid studio ↗
+        </a>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -536,7 +593,7 @@ export const EmbedWidget: React.FC = () => {
               const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
 
               const colorVal = node.width || 1;
-              const applyShadow = !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
+              const applyShadow = !isDiamond && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
 
               let customBoxShadow = '';
               if (applyShadow) {
@@ -571,16 +628,16 @@ export const EmbedWidget: React.FC = () => {
                   : "rounded-[20px] bg-paper-raised text-ink border-ink flex items-center justify-center p-2";
               } else if (node.type === 'dfd-store') {
                 shapeClasses = isDark
-                  ? "border-y border-x-0 border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-center p-2"
-                  : "border-y border-x-0 border-ink bg-paper-raised flex flex-col justify-center p-2";
+                  ? "border-y-2 border-l-2 border-r-0 border-[#E1E5E3] bg-[#1C2226] flex flex-row p-0"
+                  : "border-y-2 border-l-2 border-r-0 border-ink bg-paper-raised flex flex-row p-0";
               } else if (node.type === 'dfd-entity') {
                 shapeClasses = isDark
                   ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col justify-between p-4"
                   : "border-ink bg-paper-raised flex flex-col justify-between p-4";
               } else if (node.type === 'dfd-process') {
                 shapeClasses = isDark
-                  ? "border-[#E1E5E3] bg-[#1C2226] flex flex-col p-0"
-                  : "border-ink bg-paper-raised flex flex-col p-0";
+                  ? "rounded-lg border-2 border-[#E1E5E3] bg-[#1C2226] flex flex-col p-0"
+                  : "rounded-lg border-2 border-ink bg-paper-raised flex flex-col p-0";
               } else if (node.type === 'usecase-actor') {
                 shapeClasses = "flex flex-col items-center justify-center p-1 bg-transparent border-0 select-none shadow-none";
               } else if (node.type === 'usecase-oval') {
@@ -617,6 +674,9 @@ export const EmbedWidget: React.FC = () => {
                     boxShadow: customBoxShadow || undefined,
                     borderStyle: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? (nodeBorderStyle === 'none' ? 'none' : nodeBorderStyle) : undefined,
                     borderWidth: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? nodeBorderWidth : undefined,
+                    borderRightWidth: node.type === 'dfd-store' ? '0px' : undefined,
+                    borderRightStyle: node.type === 'dfd-store' ? 'none' : undefined,
+                    borderRightColor: node.type === 'dfd-store' ? 'transparent' : undefined,
                   }}
                   className={`absolute pointer-events-auto select-none ${shapeClasses}`}
                 >
@@ -672,12 +732,14 @@ export const EmbedWidget: React.FC = () => {
                         {node.label}
                       </div>
                     </div>
+                  ) : node.type === 'dfd-store' ? (
+                    <div className="w-full h-full flex flex-row items-center select-none overflow-hidden">{(() => { const { id: storeId, name: storeName } = parseDfdStoreLabel(node.label); return (<><div className={`w-10 h-full ${isDark ? 'bg-[#15191C] border-[#E1E5E3] text-[#9BA3A9]' : 'bg-paper border-ink text-ink-soft'} border-r-2 flex items-center justify-center font-mono font-bold text-[10px] select-none flex-shrink-0`}>{storeId}</div><div className={`flex-1 px-3 font-mono truncate ${node.textAlign === 'right' ? 'text-right' : node.textAlign === 'center' ? 'text-center' : 'text-left'} ${node.isBold === false ? 'font-normal' : 'font-bold'}`} style={textStyleObj}>{storeName}</div></>); })()}</div>
                   ) : node.type === 'dfd-process' ? (
                     <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
                       {(() => {
-                        const splitIdx = node.label.indexOf(' ');
-                        const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
-                        const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+                        const { id: processId, name: processName } = parseDfdProcessLabel(node.label);
+
+
                         return (
                           <>
                             <div className={`${isDark ? 'bg-[#15191C] border-[#E1E5E3] text-[#9BA3A9]' : 'bg-paper border-ink text-ink-soft'} border-b py-1 text-center font-bold font-mono text-[9px] select-none truncate`}>

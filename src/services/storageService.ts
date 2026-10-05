@@ -2,7 +2,11 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { authService } from './authService';
 
 const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/gif'];
+const ALLOWED_IMAGE_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 export const storageService = {
   /**
@@ -25,20 +29,19 @@ export const storageService = {
     }
 
     // Validate mime type
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      return { url: null, error: 'Invalid file type. Supported formats: JPEG, PNG, WebP, SVG, GIF.' };
+    if (!ALLOWED_IMAGE_TYPES[file.type]) {
+      return { url: null, error: 'Invalid file type. Supported formats: JPEG, PNG, and WebP.' };
     }
 
     try {
-      const fileExt = file.name.split('.').pop() || 'png';
-      const filePath = `${user.id}/avatar-${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${crypto.randomUUID()}.${ALLOWED_IMAGE_TYPES[file.type]}`;
 
       // Upload to 'avatars' bucket with upsert
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: true
+          upsert: false
         });
 
       if (uploadError || !uploadData) {

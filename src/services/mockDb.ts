@@ -230,9 +230,9 @@ const SEEDS = {
       { id: 'dfd-n1', type: 'dfd-entity', label: 'Customer', x: 40, y: 70 },
       { id: 'dfd-n2', type: 'dfd-process', label: '1.0 Process Order', x: 260, y: 50 },
       { id: 'dfd-n3', type: 'dfd-entity', label: 'Payment Gateway', x: 520, y: 70 },
-      { id: 'dfd-s1', type: 'dfd-store', label: 'Orders Store', x: 260, y: 160 },
+      { id: 'dfd-s1', type: 'dfd-store', label: 'D1 Orders Store', x: 260, y: 160 },
       { id: 'dfd-n4', type: 'dfd-process', label: '2.0 Generate Invoice', x: 260, y: 260 },
-      { id: 'dfd-s2', type: 'dfd-store', label: 'Users Database', x: 40, y: 260 }
+      { id: 'dfd-s2', type: 'dfd-store', label: 'D2 Users Database', x: 40, y: 260 }
     ],
     edges: [
       { id: 'dfd-e1', source: 'dfd-n1', target: 'dfd-n2', sourceHandle: 'right', targetHandle: 'left', label: 'Order Request' },

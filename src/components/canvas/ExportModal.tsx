@@ -51,7 +51,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   drawings,
   edgePathGetter
 }) => {
-  const [format, setFormat] = useState<ExportFormat>('png');
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('png');
+  const isPdfExportEnabled = adminService.getSystemSettingsSync().pdf_export;
+  const format: ExportFormat = (selectedFormat === 'pdf' && !isPdfExportEnabled) ? 'png' : selectedFormat;
+  const setFormat = setSelectedFormat;
   const [scale, setScale] = useState<ExportScale>(2);
   const [background, setBackground] = useState<ExportBackground>('paper');
   const [includeGrid, setIncludeGrid] = useState(false);
@@ -76,6 +79,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       edgePathGetter
     });
   }, [diagram, nodes, edges, drawings, background, includeGrid, edgePathGetter]);
+  const previewSvgUrl = useMemo(
+    () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(previewSvg)}`,
+    [previewSvg]
+  );
 
   // Compute live Mermaid code
   const mermaidCode = useMemo(() => {
@@ -102,6 +109,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         const blob = await rasterizeSvgToPngBlob(previewSvg, scale);
         downloadBlob(blob, `${cleanTitle}_${scale}x.png`);
       } else if (format === 'pdf') {
+        if (!isPdfExportEnabled) throw new Error('PDF export is disabled by platform administrators.');
         const pdfBlob = await exportDiagramToPdf(previewSvg, diagram, {
           pageSize: pdfPageSize,
           orientation: pdfOrientation,
@@ -231,10 +239,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 />
 
                 {/* Render Live SVG Output */}
-                <div 
-                  className="relative z-10 w-full h-full p-4 flex items-center justify-center select-none"
-                  dangerouslySetInnerHTML={{ __html: previewSvg }}
-                />
+                <div className="relative z-10 w-full h-full p-4 flex items-center justify-center select-none">
+                  <img src={previewSvgUrl} alt="Diagram export preview" className="max-w-full max-h-full object-contain" />
+                </div>
               </div>
             )}
 
@@ -260,11 +267,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <Layers className="w-3.5 h-3.5 text-blueprint" />
                   Format
                 </label>
-                <div className="grid grid-cols-5 border-2 border-ink font-mono text-[11px] text-center bg-paper-raised">
+                <div className={`grid ${isPdfExportEnabled ? 'grid-cols-5' : 'grid-cols-4'} border-2 border-ink font-mono text-[11px] text-center bg-paper-raised`}>
                   {([
                     { id: 'png', label: 'PNG', icon: ImageIcon },
                     { id: 'svg', label: 'SVG', icon: Code2 },
-                    { id: 'pdf', label: 'PDF', icon: FileText },
+                    ...(isPdfExportEnabled ? [{ id: 'pdf' as const, label: 'PDF', icon: FileText }] : []),
                     { id: 'mermaid', label: 'Mermaid', icon: FileCode },
                     { id: 'json', label: 'JSON', icon: FileJson }
                   ] as const).map((fmt) => {

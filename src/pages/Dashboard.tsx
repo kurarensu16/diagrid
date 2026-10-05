@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { projectService, type ProjectWithStats } from '../services/projectService';
-import { Plus, Search, Trash2, Edit3, Folder, Calendar, RefreshCw, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, Trash2, Edit3, Folder, Calendar, RefreshCw, ArrowUpDown, AlertCircle, Heart } from 'lucide-react';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { SupportModal } from '../components/ui/SupportModal';
+import { adminService } from '../services/adminService';
 import { authService } from '../services/authService';
 import { cloudSaveStatus } from '../services/cloudSaveStatus';
 import { offlineSyncService } from '../services/offlineSyncService';
@@ -21,6 +23,8 @@ export const Dashboard: React.FC = () => {
   const [actionError, setActionError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<ProjectSortOption>('updated_desc');
+  const [platformSettings, setPlatformSettings] = useState(() => adminService.getSystemSettingsSync());
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   
   // Modals / Dialog states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -39,7 +43,13 @@ export const Dashboard: React.FC = () => {
     loadProjects();
     const onSync = () => { void loadProjects(); };
     window.addEventListener('diagrid:sync-complete', onSync);
-    return () => window.removeEventListener('diagrid:sync-complete', onSync);
+    const unsubscribeSettings = adminService.onSettingsChange((settings) => {
+      setPlatformSettings(settings);
+    });
+    return () => {
+      window.removeEventListener('diagrid:sync-complete', onSync);
+      unsubscribeSettings();
+    };
   }, []);
 
   const loadProjects = async () => {
@@ -151,12 +161,34 @@ export const Dashboard: React.FC = () => {
     });
   }, [projects, searchQuery, sortBy]);
 
+  const currentUser = authService.getUserSync();
+  const isAdmin = currentUser?.role === 'admin';
+  const isSupporter = !!currentUser?.is_supporter;
+  const maxProjects = platformSettings.max_projects_per_user;
+  const isQuotaEnforced = !isAdmin && !isSupporter && maxProjects > 0;
+  const isQuotaReached = isQuotaEnforced && projects.length >= maxProjects;
+
   return (
     <div className="p-4 sm:p-8 flex flex-col gap-6 text-ink">
       {/* Header section with search and creation trigger */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-line pb-6">
         <div>
-          <h1 className="text-[32px] font-bold tracking-tight">projects</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-[32px] font-bold tracking-tight">projects</h1>
+            {isQuotaEnforced ? (
+              <span className={`text-[11px] font-mono px-2 py-0.5 border ${
+                isQuotaReached 
+                  ? 'border-signal text-signal bg-signal/10 font-bold' 
+                  : 'border-line text-ink-soft bg-paper-raised'
+              }`}>
+                {projects.length} / {maxProjects} limit
+              </span>
+            ) : (
+              <span className="text-[11px] font-mono px-2 py-0.5 border border-line text-ink-soft bg-paper-raised">
+                {projects.length} active {isAdmin ? '(admin)' : isSupporter ? '(supporter)' : ''}
+              </span>
+            )}
+          </div>
           <p className="text-[13px] text-ink-soft font-mono mt-1">// manage your cloud diagram workspaces</p>
         </div>
         
@@ -191,12 +223,31 @@ export const Dashboard: React.FC = () => {
             </select>
           </div>
           
-          <Button onClick={() => { setActionError(''); setIsCreateModalOpen(true); }} className="flex items-center gap-1.5 shrink-0">
+          <Button onClick={() => { if (isQuotaReached) { setActionError(`Project quota reached (${projects.length}/${maxProjects}).`); return; } setActionError(''); setIsCreateModalOpen(true); }} disabled={isQuotaReached} title={isQuotaReached ? `Quota reached (${projects.length}/${maxProjects})` : undefined} className="flex items-center gap-1.5 shrink-0">
             <Plus className="w-4 h-4" />
             create_project()
           </Button>
         </div>
       </div>
+
+      {isQuotaReached && (
+        <div role="alert" className="border-2 border-signal bg-signal/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink font-mono shadow-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-signal shrink-0" />
+            <span>
+              <strong className="text-signal uppercase">Project Quota Reached:</strong> You have reached your account limit of {maxProjects} projects.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsSupportModalOpen(true)}
+            className="flex items-center gap-1.5 text-signal hover:text-ink font-bold underline cursor-pointer text-[12px]"
+          >
+            <Heart className="w-3.5 h-3.5 fill-signal text-signal" />
+            unlock_unlimited_with_supporter()
+          </button>
+        </div>
+      )}
 
       {pendingCount > 0 && (
         <div role="status" className="border border-blueprint bg-blueprint/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink">
@@ -218,7 +269,16 @@ export const Dashboard: React.FC = () => {
           <Folder className="w-12 h-12 text-ink-soft mb-4 stroke-1" />
           <h3 className="text-[16px] font-bold mb-1">No projects found</h3>
           <p className="text-[13px] text-ink-soft font-mono mb-6">// create your first project folder to host diagrams</p>
-          <Button onClick={() => setIsCreateModalOpen(true)}>
+          <Button 
+            onClick={() => {
+              if (isQuotaReached) {
+                setActionError(`Project quota reached (${projects.length}/${maxProjects}).`);
+                return;
+              }
+              setIsCreateModalOpen(true);
+            }}
+            disabled={isQuotaReached}
+          >
             create_project()
           </Button>
         </Card>
@@ -387,6 +447,12 @@ export const Dashboard: React.FC = () => {
         confirmText="Delete Workspace"
         danger={true}
         requireMatchString={projectToDelete?.name}
+      />
+
+      {/* Support / Unlimited Projects Modal */}
+      <SupportModal
+        isOpen={isSupportModalOpen}
+        onClose={() => setIsSupportModalOpen(false)}
       />
     </div>
   );

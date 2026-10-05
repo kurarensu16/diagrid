@@ -1,6 +1,8 @@
 import { type CanvasNode, type CanvasEdge, type Diagram } from '../services/mockDb';
 import { jsPDF } from 'jspdf';
+import DOMPurify from 'dompurify';
 import { calculateEdgePath, getEdgeLabelPosition } from './edgeRouting';
+import { parseDfdStoreLabel, parseDfdProcessLabel } from './dfdHelpers';
 
 export interface FreehandDrawing {
   id: string;
@@ -47,7 +49,7 @@ const getDefaultDimensions = (node: CanvasNode): { width: number; height: number
     return { width: 96, height: 96 };
   }
   if (node.type === 'terminal') return { width: 120, height: 38 };
-  if (node.type === 'dfd-store') return { width: 140, height: 48 };
+  if (node.type === 'dfd-store') return { width: 160, height: 48 };
   if (node.type === 'dfd-entity') return { width: 120, height: 56 };
   if (node.type === 'dfd-process') return { width: 130, height: 64 };
   if (node.type === 'usecase-actor') return { width: 70, height: 90 };
@@ -355,9 +357,9 @@ export const generateStandaloneSvg = (
     }
 
     if (node.type === 'dfd-process') {
-      const splitIdx = node.label.indexOf(' ');
-      const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
-      const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+      const { id: processId, name: processName } = parseDfdProcessLabel(node.label);
+
+
 
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
@@ -375,15 +377,22 @@ export const generateStandaloneSvg = (
     }
 
     if (node.type === 'dfd-store') {
+      const { id: storeId, name: storeName } = parseDfdStoreLabel(node.label);
+      const idWidth = 40;
+      const strokeColor = isDark ? '#E1E5E3' : '#15191C';
+      const idFill = isDark ? '#15191C' : '#FFFFFF';
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
-          ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" fill="${shadowColor}" />` : ''}
+          <!-- Gane & Sarson Open-Ended Store (No solid block shadow) -->
           <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" />
-          <line x1="0" y1="0" x2="${width}" y2="0" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <line x1="0" y1="${height}" x2="${width}" y2="${height}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
-            [D] ${escapeXml(node.label)}
-          </text>
+          <rect x="0" y="0" width="${idWidth}" height="${height}" fill="${idFill}" />
+          <path d="M ${width} 0 L 0 0 L 0 ${height} L ${width} ${height}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="${idWidth}" y1="0" x2="${idWidth}" y2="${height}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+
+          <text x="${idWidth / 2}" y="${height / 2 + 4}" fill="${isDark ? '#9BA3A9' : '#525E65'}" font-size="10" font-family="'JetBrains Mono', monospace" font-weight="bold" text-anchor="middle">${escapeXml(storeId)}</text>
+          <text x="${idWidth + 10}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="start">${escapeXml(storeName)}</text>
+
+
         </g>
       `;
     }
@@ -544,7 +553,7 @@ export const generateStandaloneSvg = (
   const markerStroke = isDark ? '#E1E5E3' : '#15191C';
   const markerCircleFill = isDark ? '#1C2226' : '#FFFFFF';
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>
 <svg 
   xmlns="http://www.w3.org/2000/svg" 
   viewBox="${box.minX} ${box.minY} ${box.width} ${box.height}"
@@ -620,6 +629,12 @@ export const generateStandaloneSvg = (
 
   ${titleWatermark}
 </svg>`;
+
+  return DOMPurify.sanitize(svgMarkup, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    FORBID_TAGS: ['script', 'foreignObject', 'iframe', 'object', 'embed', 'image', 'use', 'a', 'style'],
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+  });
 };
 
 // Rasterize SVG string to HTML5 Canvas & PNG Blob

@@ -5,6 +5,7 @@ import { projectService } from './projectService';
 import { adminService } from './adminService';
 import { cloudSaveStatus } from './cloudSaveStatus';
 import { offlineSyncService } from './offlineSyncService';
+import { parseAndValidateDiagramContent } from '../utils/diagramSecurity';
 
 export type DiagramSaveResult =
   | { status: 'cloud-saved'; savedAt: string }
@@ -132,12 +133,10 @@ export const diagramService = {
       contentString = template ? template.content : JSON.stringify({ nodes: [], edges: [] });
     }
 
-    let parsedContent: any = { nodes: [], edges: [] };
-    try {
-      parsedContent = JSON.parse(contentString);
-    } catch {
-      parsedContent = { nodes: [], edges: [] };
-    }
+    const validation = parseAndValidateDiagramContent(contentString);
+    if (!validation.ok) throw new Error(validation.error);
+    const parsedContent = validation.value;
+    contentString = JSON.stringify(parsedContent);
 
     if (!isSupabaseConfigured() || !user) {
       const local = mockDb.createDiagram(projectId, title, type);
@@ -174,20 +173,13 @@ export const diagramService = {
     content: string | object,
     thumbnailUrl?: string
   ): Promise<DiagramSaveResult> => {
-    let contentObj: any;
-    let contentStr: string;
-
-    if (typeof content === 'string') {
-      contentStr = content;
-      try {
-        contentObj = JSON.parse(content);
-      } catch {
-        contentObj = { nodes: [], edges: [] };
-      }
-    } else {
-      contentObj = content;
-      contentStr = JSON.stringify(content);
+    const validation = parseAndValidateDiagramContent(content);
+    if (!validation.ok) {
+      console.warn('[diagramService] Rejected unsafe diagram content:', validation.error);
+      return { status: 'failed' };
     }
+    const contentObj = validation.value;
+    const contentStr = JSON.stringify(contentObj);
 
     // Keep the latest edit in this browser before attempting the account save.
     let localSaved = false;

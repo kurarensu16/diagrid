@@ -1,7 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { adminService, type AdminUser } from '../../services/adminService';
-import { Search, Eye, X, UserCheck, UserX, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, RefreshCw, Heart, MoreVertical } from 'lucide-react';
+import { authService, type AuthUser } from '../../services/authService';
+import {
+  Search,
+  Eye,
+  X,
+  UserCheck,
+  UserX,
+  Shield,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  RefreshCw,
+  Heart,
+  MoreVertical,
+  Archive,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react';
 
 export const AdminUsers: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -12,6 +31,26 @@ export const AdminUsers: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(authService.getUserSync());
+
+  // Confirm Modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    description?: string;
+    confirmText?: string;
+    cancelText?: string;
+    danger?: boolean;
+    requireMatchString?: string;
+    onConfirm: () => Promise<void> | void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -19,6 +58,9 @@ export const AdminUsers: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    void authService.getUser().then((u) => {
+      if (u) setCurrentUser(u);
+    });
   }, []);
 
   // Reset to first page when search or filters change
@@ -36,28 +78,124 @@ export const AdminUsers: React.FC = () => {
     }
   };
 
-  const handleToggleStatus = async (id: string, currentStatus: 'active' | 'suspended') => {
-    const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
-    if (confirm(`Are you sure you want to change this user status to ${nextStatus.toUpperCase()}?`)) {
-      const result = await adminService.setUserStatus(id, nextStatus);
-      if (result.error) {
-        setActionError(result.error);
-        return;
-      }
-      await loadUsers();
-      if (selectedUser && selectedUser.id === id) {
-        setSelectedUser({ ...selectedUser, status: nextStatus });
-      }
+  const promptToggleStatus = (user: AdminUser) => {
+    if (currentUser?.id === user.id) {
+      setActionError('Administrators cannot suspend their own account.');
+      return;
     }
+    if (user.role === 'admin' && user.status === 'active') {
+      setActionError('Administrator accounts cannot be suspended. Demote to standard user first.');
+      return;
+    }
+
+    const nextStatus = user.status === 'active' ? 'suspended' : 'active';
+    const isSuspending = nextStatus === 'suspended';
+
+    setConfirmModal({
+      isOpen: true,
+      title: isSuspending ? 'suspend_user_account()' : 'activate_user_account()',
+      message: `${isSuspending ? 'Suspend' : 'Re-activate'} account for ${user.email}?`,
+      description: isSuspending
+        ? 'The user will immediately be blocked from creating, editing, and reading platform projects and diagrams via security policies.'
+        : 'This restores complete platform access for this user account.',
+      confirmText: isSuspending ? 'suspend_account()' : 'activate_account()',
+      cancelText: 'cancel()',
+      danger: isSuspending,
+      onConfirm: async () => {
+        setActionError(null);
+        const result = await adminService.setUserStatus(user.id, nextStatus);
+        if (result.error) {
+          setActionError(result.error);
+          return;
+        }
+        setActionNotice(`${isSuspending ? 'Suspended' : 'Activated'} account for ${user.email}.`);
+        await loadUsers();
+        if (selectedUser && selectedUser.id === user.id) {
+          setSelectedUser({ ...selectedUser, status: nextStatus });
+        }
+      },
+    });
   };
 
-  const handleToggleSupporter = async (id: string, isSupporter: boolean) => {
+  const promptToggleRole = (user: AdminUser) => {
+    if (currentUser?.id === user.id) {
+      setActionError('You cannot change your own administrator role.');
+      return;
+    }
+
+    const nextRole = user.role === 'admin' ? 'user' : 'admin';
+    const isPromoting = nextRole === 'admin';
+
+    setConfirmModal({
+      isOpen: true,
+      title: isPromoting ? 'promote_to_admin()' : 'demote_to_user()',
+      message: `${isPromoting ? 'Promote' : 'Demote'} ${user.email} ${isPromoting ? 'to Administrator' : 'to standard User'}?`,
+      description: isPromoting
+        ? 'This grants full administrator privileges, including access to administrative telemetry, settings, and user moderation.'
+        : 'This revokes administrator privileges. The user will be restricted to standard developer workspace features.',
+      confirmText: isPromoting ? 'promote_admin()' : 'demote_user()',
+      cancelText: 'cancel()',
+      danger: !isPromoting,
+      onConfirm: async () => {
+        setActionError(null);
+        const result = await adminService.setUserRole(user.id, nextRole);
+        if (result.error) {
+          setActionError(result.error);
+          return;
+        }
+        setActionNotice(`${isPromoting ? 'Promoted' : 'Demoted'} ${user.email} to ${nextRole}.`);
+        await loadUsers();
+        if (selectedUser && selectedUser.id === user.id) {
+          setSelectedUser({ ...selectedUser, role: nextRole });
+        }
+      },
+    });
+  };
+
+  const promptArchiveUser = (user: AdminUser) => {
+    if (currentUser?.id === user.id) {
+      setActionError('Administrators cannot archive their own account.');
+      return;
+    }
+    if (user.role === 'admin') {
+      setActionError('Administrator accounts cannot be archived directly. Demote to standard user first.');
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'archive_user_account()',
+      message: `Archive and deactivate account for ${user.email}?`,
+      description: `This executes a safe soft-delete: the user is immediately locked out of all projects and diagrams, but their ${user.project_count} project(s), ${user.diagram_count} diagram(s), and audit trail are safely preserved in the database. You can re-activate this user at any time.`,
+      confirmText: 'archive_account()',
+      cancelText: 'cancel()',
+      danger: true,
+
+      onConfirm: async () => {
+        setActionError(null);
+        const result = await adminService.deleteUser(user.id);
+        if (result.error) {
+          setActionError(result.error);
+          return;
+        }
+        setActionNotice(`Archived (soft-deleted) account for ${user.email}. All data preserved.`);
+        if (selectedUser && selectedUser.id === user.id) {
+          setSelectedUser({ ...selectedUser, status: 'suspended', is_supporter: false });
+        }
+        await loadUsers();
+      },
+    });
+  };
+
+  const handleToggleSupporter = async (id: string, isSupporter: boolean, email?: string) => {
     const nextState = !isSupporter;
+    setActionError(null);
     const result = await adminService.setUserSupporterStatus(id, nextState);
     if (result.error) {
       setActionError(result.error);
       return;
     }
+    setActionNotice(`${nextState ? 'Granted' : 'Revoked'} supporter perk${email ? ` for ${email}` : ''}.`);
     await loadUsers();
     if (selectedUser && selectedUser.id === id) {
       setSelectedUser({ ...selectedUser, is_supporter: nextState });
@@ -155,9 +293,24 @@ export const AdminUsers: React.FC = () => {
         </div>
       </div>
 
+      {actionNotice && (
+        <div className="bg-blueprint/10 border border-blueprint text-blueprint px-4 py-2.5 font-mono text-[12px] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span>STATUS: {actionNotice}</span>
+          </div>
+          <button onClick={() => setActionNotice(null)} className="cursor-pointer hover:text-ink" aria-label="Dismiss notice">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {actionError && (
-        <div className="flex items-center justify-between border border-signal bg-signal/10 px-3 py-2 font-mono text-[11px] text-signal">
-          <span>action_error: {actionError}</span>
+        <div className="flex items-center justify-between border border-signal bg-signal/10 px-4 py-2.5 font-mono text-[12px] text-signal">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>ACTION_ERROR: {actionError}</span>
+          </div>
           <button onClick={() => setActionError(null)} className="cursor-pointer hover:text-ink" aria-label="Dismiss error">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -250,7 +403,7 @@ export const AdminUsers: React.FC = () => {
                       </button>
 
                       {openActionMenu === u.id && (
-                        <div className="absolute right-0 top-full z-20 mt-1 min-w-[155px] border border-ink bg-paper shadow-hard font-mono text-[10px] text-left">
+                        <div className="absolute right-0 top-full z-20 mt-1 min-w-[170px] border border-ink bg-paper shadow-hard font-mono text-[10px] text-left">
                           <button
                             onClick={() => {
                               setSelectedUser(u);
@@ -258,31 +411,70 @@ export const AdminUsers: React.FC = () => {
                             }}
                             className="w-full px-3 py-2 flex items-center gap-2 hover:bg-paper-raised cursor-pointer"
                           >
-                            <Eye className="w-3 h-3" />
-                            details
+                            <Eye className="w-3 h-3 text-blueprint" />
+                            details()
                           </button>
+
                           <button
                             onClick={() => {
                               setOpenActionMenu(null);
-                              void handleToggleSupporter(u.id, !!u.is_supporter);
+                              void handleToggleSupporter(u.id, !!u.is_supporter, u.email);
                             }}
-                            className={`w-full px-3 py-2 flex items-center gap-2 hover:bg-paper-raised cursor-pointer ${u.is_supporter ? 'text-rose-600' : 'text-ink'}`}
+                            className={`w-full px-3 py-2 flex items-center gap-2 hover:bg-paper-raised cursor-pointer ${
+                              u.is_supporter ? 'text-rose-600' : 'text-ink'
+                            }`}
                           >
                             <Heart className={`w-3 h-3 ${u.is_supporter ? 'fill-rose-600' : ''}`} />
-                            {u.is_supporter ? 'revoke_perk' : 'grant_perk'}
+                            {u.is_supporter ? 'revoke_perk()' : 'grant_perk()'}
                           </button>
+
+                          {/* Role Promotion / Demotion */}
+                          {currentUser?.id !== u.id && (
+                            <button
+                              onClick={() => {
+                                setOpenActionMenu(null);
+                                promptToggleRole(u);
+                              }}
+                              className={`w-full px-3 py-2 flex items-center gap-2 border-t border-line hover:bg-paper-raised cursor-pointer ${
+                                u.role === 'admin' ? 'text-ink-soft hover:text-signal' : 'text-blueprint'
+                              }`}
+                            >
+                              <Shield className="w-3 h-3" />
+                              {u.role === 'admin' ? 'demote_to_user()' : 'promote_to_admin()'}
+                            </button>
+                          )}
+
+                          {/* Account Status: Suspend / Activate */}
                           {u.role === 'admin' ? (
-                            <div className="px-3 py-2 text-ink-soft italic border-t border-line">// locked</div>
+                            <div className="px-3 py-1.5 text-ink-soft text-[9px] italic border-t border-line">
+                              // admin status protected
+                            </div>
                           ) : (
                             <button
                               onClick={() => {
                                 setOpenActionMenu(null);
-                                void handleToggleStatus(u.id, u.status);
+                                promptToggleStatus(u);
                               }}
-                              className={`w-full px-3 py-2 flex items-center gap-2 border-t border-line hover:bg-paper-raised cursor-pointer ${u.status === 'active' ? 'text-signal' : 'text-blueprint'}`}
+                              className={`w-full px-3 py-2 flex items-center gap-2 border-t border-line hover:bg-paper-raised cursor-pointer ${
+                                u.status === 'active' ? 'text-signal' : 'text-emerald-600'
+                              }`}
                             >
                               {u.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
                               {u.status === 'active' ? 'suspend()' : 'activate()'}
+                            </button>
+                          )}
+
+                          {/* Archive / Soft-Delete Account */}
+                          {currentUser?.id !== u.id && u.role !== 'admin' && u.status !== 'suspended' && (
+                            <button
+                              onClick={() => {
+                                setOpenActionMenu(null);
+                                promptArchiveUser(u);
+                              }}
+                              className="w-full px-3 py-2 flex items-center gap-2 border-t border-line hover:bg-paper-raised text-ink-soft hover:text-signal cursor-pointer"
+                            >
+                              <Archive className="w-3 h-3" />
+                              archive_account()
                             </button>
                           )}
                         </div>
@@ -520,35 +712,64 @@ export const AdminUsers: React.FC = () => {
             </div>
 
             {/* Modal Actions */}
-            <div className="flex justify-between items-center pt-2">
-              {selectedUser.role !== 'admin' ? (
-                <button
-                  onClick={() => handleToggleStatus(selectedUser.id, selectedUser.status)}
-                  className={`flex items-center gap-1.5 font-mono text-[11px] border px-4 py-2 uppercase tracking-wide cursor-pointer transition-colors ${
-                    selectedUser.status === 'active'
-                      ? 'border-signal text-signal hover:bg-signal hover:text-paper'
-                      : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
-                  }`}
-                >
-                  {selectedUser.status === 'active' ? (
-                    <>
-                      <UserX className="w-3.5 h-3.5" />
-                      suspend_account()
-                    </>
-                  ) : (
-                    <>
-                      <UserCheck className="w-3.5 h-3.5" />
-                      activate_account()
-                    </>
-                  )}
-                </button>
-              ) : (
-                <span className="font-mono text-[11px] text-ink-soft italic">// admin accounts cannot be suspended</span>
-              )}
+            <div className="flex flex-wrap justify-between items-center gap-3 pt-3 border-t border-line">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Account Status */}
+                {selectedUser.role !== 'admin' ? (
+                  <button
+                    onClick={() => promptToggleStatus(selectedUser)}
+                    className={`flex items-center gap-1.5 font-mono text-[11px] border px-3 py-1.5 uppercase tracking-wide cursor-pointer transition-colors ${
+                      selectedUser.status === 'active'
+                        ? 'border-signal text-signal hover:bg-signal hover:text-paper'
+                        : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
+                    }`}
+                  >
+                    {selectedUser.status === 'active' ? (
+                      <>
+                        <UserX className="w-3.5 h-3.5" />
+                        suspend_account()
+                      </>
+                    ) : (
+                      <>
+                        <UserCheck className="w-3.5 h-3.5" />
+                        activate_account()
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <span className="font-mono text-[11px] text-ink-soft italic">// admin accounts cannot be suspended</span>
+                )}
+
+                {/* Role Promotion / Demotion */}
+                {currentUser?.id !== selectedUser.id && (
+                  <button
+                    onClick={() => promptToggleRole(selectedUser)}
+                    className={`flex items-center gap-1.5 font-mono text-[11px] border px-3 py-1.5 uppercase tracking-wide cursor-pointer transition-colors ${
+                      selectedUser.role === 'admin'
+                        ? 'border-line text-ink-soft hover:border-signal hover:text-signal'
+                        : 'border-blueprint text-blueprint hover:bg-blueprint hover:text-paper'
+                    }`}
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    {selectedUser.role === 'admin' ? 'demote_to_user()' : 'promote_to_admin()'}
+                  </button>
+                )}
+
+                {/* Account Archiving (Soft-Delete) */}
+                {currentUser?.id !== selectedUser.id && selectedUser.role !== 'admin' && selectedUser.status !== 'suspended' && (
+                  <button
+                    onClick={() => promptArchiveUser(selectedUser)}
+                    className="flex items-center gap-1.5 font-mono text-[11px] border border-line text-ink-soft hover:border-signal hover:text-signal hover:bg-paper-raised px-3 py-1.5 uppercase tracking-wide cursor-pointer transition-colors"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    archive_account()
+                  </button>
+                )}
+              </div>
 
               <button
                 onClick={() => setSelectedUser(null)}
-                className="font-mono text-[11px] border border-line px-4 py-2 hover:bg-ink hover:text-paper uppercase tracking-wide transition-colors cursor-pointer"
+                className="font-mono text-[11px] border border-line px-4 py-1.5 hover:bg-ink hover:text-paper uppercase tracking-wide transition-colors cursor-pointer"
               >
                 close()
               </button>
@@ -556,6 +777,23 @@ export const AdminUsers: React.FC = () => {
           </Card>
         </div>
       )}
+
+      {/* Confirm Action Modal Dialog */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={async () => {
+          await confirmModal.onConfirm();
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        }}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        description={confirmModal.description}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        danger={confirmModal.danger}
+        requireMatchString={confirmModal.requireMatchString}
+      />
     </div>
   );
 };

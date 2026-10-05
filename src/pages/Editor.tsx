@@ -10,6 +10,7 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { FeedbackModal } from '../components/ui/FeedbackModal';
 import { useCurrentUser } from '../services/mockAuth';
 import { authService } from '../services/authService';
+import { adminService } from '../services/adminService';
 import {
   type FreehandDrawing,
   pointsToSmoothSvgPath,
@@ -22,6 +23,7 @@ import {
   dc,
 } from '../types/canvas';
 import { calculateEdgePath } from '../utils/edgeRouting';
+import { parseDfdStoreLabel, parseDfdProcessLabel } from '../utils/dfdHelpers';
 import { CanvasSpatialIndex } from '../utils/spatialIndex';
 import { FreehandLayer } from '../components/canvas/FreehandLayer';
 import { EdgeLayer } from '../components/canvas/EdgeLayer';
@@ -35,6 +37,7 @@ import { useCanvasSelection } from '../hooks/canvas/useCanvasSelection';
 import { useCanvasTransform } from '../hooks/canvas/useCanvasTransform';
 import { useEdgeInteractions, getClosestPortOnNode } from '../hooks/canvas/useEdgeInteractions';
 import { parseCodeToDiagram, diagramToMermaid, CODE_PRESETS_LIST, type CodeToDiagramResult, type LayoutDirection } from '../utils/codeToDiagram';
+import { parseAndValidateDiagramContent } from '../utils/diagramSecurity';
 import { 
   Plus,
   Sliders,
@@ -70,7 +73,7 @@ const getToolIcon = (type: CanvasNode['type']): React.ReactNode => {
     case 'terminal': return <Circle className="w-3.5 h-3.5 text-ink" />;
     case 'dfd-entity': return <Square className={iconClass} />;
     case 'dfd-process': return <Circle className={iconClass} />;
-    case 'dfd-store': return <span className="w-3.5 h-2.5 border-y border-ink" />;
+    case 'dfd-store': return <span className="w-3.5 h-2.5 border-y border-l border-ink relative inline-block"><span className="absolute left-1 top-0 bottom-0 border-r border-ink" /></span>;
     case 'usecase-actor': return <User className={iconClass} />;
     case 'usecase-oval': return <Circle className={iconClass} />;
     case 'usecase-boundary': return <Square className="w-3.5 h-3.5 text-ink-soft" />;
@@ -320,6 +323,7 @@ export const Editor: React.FC = () => {
   const [codeDirection, setCodeDirection] = useState<LayoutDirection>('LR');
   const [codeMode, setCodeMode] = useState<'replace' | 'append'>('replace');
   const [codeStatus, setCodeStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [codePreview, setCodePreview] = useState<{
     source: string;
     direction: LayoutDirection;
@@ -327,7 +331,43 @@ export const Editor: React.FC = () => {
     result: CodeToDiagramResult;
   } | null>(null);
 
-  useEffect(() => { setCodePreview(null); }, [codeText, codeDirection, codeMode]);
+  // Debounced live preview — auto-computes preview 450ms after user pauses typing
+  useEffect(() => {
+    if (!codeText.trim()) {
+      setCodePreview(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      try {
+        const startOffset = codeMode === 'append' ? { x: 80 + nodes.length * 30, y: 80 + nodes.length * 30 } : { x: 80, y: 80 };
+        const result = parseCodeToDiagram(codeText, codeDirection, startOffset);
+        if (result.nodes.length > 0) {
+          setCodePreview({ source: codeText, direction: codeDirection, mode: codeMode, result });
+          setCodeStatus(null);
+        } else {
+          setCodePreview(null);
+        }
+      } catch {
+        // Incomplete code while typing - leave preview intact until valid
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [codeText, codeDirection, codeMode, nodes.length]);
+
+  const [isSyntaxReferenceOpen, setIsSyntaxReferenceOpen] = useState(false);
+  const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+
+  const handleCopySnippet = async (snippetId: string, snippetCode: string) => {
+    try {
+      await navigator.clipboard.writeText(snippetCode);
+      setCopiedSnippetId(snippetId);
+      setTimeout(() => setCopiedSnippetId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy snippet:', err);
+    }
+  };
 
   // Filter presets to strictly show only the preset for the chosen diagram template (e.g. ERD preset for ERD, Flowchart preset for Flowchart)
   const templatePresets = useMemo(() => {
@@ -376,8 +416,8 @@ export const Editor: React.FC = () => {
       const result = parseCodeToDiagram(codeText, codeDirection, startOffset);
       if (result.nodes.length === 0) {
         const detail = result.diagnostics[0];
-        setCodeStatus({ type: 'error', message: detail ? `No valid shapes found. Line ${detail.line}: ${detail.message}.` : 'No valid shapes found in code.' });
-        setCodePreview(null);
+        setCodeStatus({ type: 'error', message: detail ? `No valid shapes found. Line ${detail.line}, column ${detail.column}: ${detail.message}` : 'No valid shapes found in code.' });
+        setCodePreview({ source: codeText, direction: codeDirection, mode: codeMode, result });
         return;
       }
       setCodeStatus(null);
@@ -407,6 +447,17 @@ export const Editor: React.FC = () => {
       type: 'success',
       message: `Generated ${result.nodes.length} shapes & ${result.edges.length} connections${result.diagnostics.length ? `; skipped ${result.diagnostics.length} lines` : ''}.`
     });
+  };
+
+  const handleCodeDiagnosticSelect = (line: number, column: number) => {
+    const textarea = codeTextareaRef.current;
+    if (!textarea) return;
+    const sourceLines = codeText.split(/\r?\n/);
+    const lineIndex = Math.max(0, Math.min(line - 1, sourceLines.length - 1));
+    const lineStart = sourceLines.slice(0, lineIndex).reduce((offset, sourceLine) => offset + sourceLine.length + 1, 0);
+    const position = lineStart + Math.max(0, Math.min(column - 1, sourceLines[lineIndex]?.length || 0));
+    textarea.focus();
+    textarea.setSelectionRange(position, Math.min(position + 1, codeText.length));
   };
 
   // Clear all canvas contents
@@ -496,6 +547,7 @@ export const Editor: React.FC = () => {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // History Undo/Redo States
   const onRestoreHistoryRef = useRef<(snapshot: CanvasSnapshot) => void>(() => {});
@@ -731,10 +783,11 @@ export const Editor: React.FC = () => {
           }
 
           try {
-            const parsed = JSON.parse(d.content);
-            const initialNodes = parsed.nodes || [];
-            const initialEdges = parsed.edges || [];
-            const initialDrawings = parsed.drawings || [];
+            const validation = parseAndValidateDiagramContent(d.content);
+            if (!validation.ok) throw new Error(validation.error);
+            const initialNodes = validation.value.nodes as unknown as CanvasNode[];
+            const initialEdges = validation.value.edges as unknown as CanvasEdge[];
+            const initialDrawings = validation.value.drawings as unknown as FreehandDrawing[];
             const initialContent = JSON.stringify({ nodes: initialNodes, edges: initialEdges, drawings: initialDrawings });
             latestContentRef.current = initialContent;
             lastAttemptedContentRef.current = initialContent;
@@ -823,6 +876,15 @@ export const Editor: React.FC = () => {
         } else if (key === 'a') {
           e.preventDefault();
           selectAllNodes();
+        } else if (key === '=' || key === '+') {
+          e.preventDefault();
+          handleZoomIn();
+        } else if (key === '-' || key === '_') {
+          e.preventDefault();
+          handleZoomOut();
+        } else if (key === '0') {
+          e.preventDefault();
+          handleResetZoom();
         }
         return;
       }
@@ -913,7 +975,7 @@ export const Editor: React.FC = () => {
     else if (type === 'decision') defaultLabel = 'Branch?';
     else if (type === 'dfd-entity') defaultLabel = 'External Entity';
     else if (type === 'dfd-process') defaultLabel = '1.0 DFD Process';
-    else if (type === 'dfd-store') defaultLabel = 'Data Store';
+    else if (type === 'dfd-store') defaultLabel = 'D1 Data Store';
     else if (type === 'usecase-actor') defaultLabel = 'User Actor';
     else if (type === 'usecase-oval') defaultLabel = 'Perform Action';
     else if (type === 'usecase-boundary') defaultLabel = 'System Boundary';
@@ -1922,10 +1984,10 @@ export const Editor: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsShareOpen(true)}
-            className="py-1.5 px-2.5 sm:px-3 text-[11.5px] sm:text-[12px] border-2 border-ink bg-paper hover:bg-paper-raised text-ink transition-colors flex items-center gap-1.5 font-bold cursor-pointer shadow-sm"
-            title="Share & Embed Diagram"
+            className={`py-1.5 px-2.5 sm:px-3 text-[11.5px] sm:text-[12px] border-2 border-ink transition-colors flex items-center gap-1.5 font-bold cursor-pointer shadow-sm ${adminService.getSystemSettingsSync().public_sharing ? 'bg-paper hover:bg-paper-raised text-ink' : 'bg-paper-raised text-ink-soft opacity-85'}`}
+            title={adminService.getSystemSettingsSync().public_sharing ? 'Share & Embed Diagram' : 'Public sharing is currently disabled by administrator'}
           >
-            <Share2 className="w-3.5 h-3.5 text-signal" />
+            <Share2 className={`w-3.5 h-3.5 ${adminService.getSystemSettingsSync().public_sharing ? 'text-signal' : 'text-ink-soft'}`} />
             <span className="hidden sm:inline">Share</span>
           </button>
           <Button variant="primary" onClick={triggerExport} className="py-1.5 px-2.5 sm:px-3 text-[11.5px] sm:text-[12px] flex items-center gap-1">
@@ -2423,16 +2485,31 @@ export const Editor: React.FC = () => {
                   <div className="flex flex-col gap-1 flex-1 min-h-[180px]">
                     <div className="flex justify-between items-center text-[10px] text-ink-soft font-bold">
                       <span>MERMAID / TEXT CODE</span>
-                      <span className="text-[9px] text-blueprint">v10+ Syntax</span>
+                      <span className="text-[9px] text-blueprint font-mono">Live Preview Enabled</span>
                     </div>
                     <textarea
+                      ref={codeTextareaRef}
                       value={codeText}
                       onChange={(e) => setCodeText(e.target.value)}
-                      className="w-full flex-1 min-h-[180px] bg-[#101417] text-[#E2E8F0] text-[11px] p-2.5 border-2 border-ink resize-none focus:outline-none focus:border-blueprint leading-relaxed select-text"
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData('text');
+                        if (/^(flowchart|graph|erDiagram|sequenceDiagram|dfdDiagram|usecaseDiagram|activityDiagram)\b/i.test(pasted.trim())) {
+                          const isVertical = /\b(TD|TB)\b/i.test(pasted) || /^activityDiagram\b/i.test(pasted.trim());
+                          setCodeDirection(isVertical ? 'TD' : 'LR');
+                          setCodeStatus({ type: 'success', message: 'Diagram syntax detected and direction set.' });
+                        }
+                      }}
+                      className="w-full flex-1 min-h-[180px] bg-[#101417] text-[#E2E8F0] text-[11px] p-2.5 border-2 border-ink resize-none focus:outline-none focus:border-blueprint leading-relaxed select-text font-mono"
                       placeholder={
                         diagram?.type === 'erd'
                           ? `Table: Users\n- id uuid pk\n- email text\n\nTable: Orders\n- id uuid pk\n- user_id uuid fk\n\nUsers --> Orders: places`
-                          : `flowchart LR\n  A[Start] --> B{Is Valid?}\n  B -- Yes --> C[(Database)]\n  B -- No --> D[Error Screen]\n  D --> A`
+                          : diagram?.type === 'dfd'
+                          ? `dfdDiagram LR\n  entity Client as "Web Client"\n  process Ingress as "1.0 Ingress"\n  store DataStore as "D1 Database"\n  Client --> Ingress --> DataStore`
+                          : diagram?.type === 'usecase'
+                          ? `usecaseDiagram LR\n  actor User\n  actor Admin\n  usecase Login\n  User --> Login`
+                          : diagram?.type === 'activity'
+                          ? `activityDiagram TD\n  start --> action "Process Task"\n  action "Process Task" --> end`
+                          : `flowchart LR\n  A[Start]:::blue --> B{Is Valid?}\n  B -- Yes --> C[(Database)]:::green\n  B -- No --> D[Error Screen]:::red\n  D --> A`
                       }
                       spellCheck={false}
                     />
@@ -2467,11 +2544,93 @@ export const Editor: React.FC = () => {
                       existingEdges={edges.length}
                       onApply={handleApplyCodePreview}
                       onCancel={() => setCodePreview(null)}
+                      onDiagnosticSelect={handleCodeDiagnosticSelect}
                     />
                   )}
 
+                  {/* Collapsible Syntax Cheatsheet Card */}
+                  <div className="border border-line bg-paper-raised">
+                    <button
+                      type="button"
+                      onClick={() => setIsSyntaxReferenceOpen(!isSyntaxReferenceOpen)}
+                      className="w-full py-1.5 px-2 text-[10px] font-bold text-ink-soft hover:text-ink flex items-center justify-between cursor-pointer border-b border-line bg-paper"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <FileCode className="w-3.5 h-3.5 text-blueprint" />
+                        <span>SYNTAX CHEATSHEET & EXAMPLES</span>
+                      </span>
+                      <span className="text-[9px] text-blueprint font-bold">{isSyntaxReferenceOpen ? '▲ Hide' : '▼ View'}</span>
+                    </button>
+                    {isSyntaxReferenceOpen && (
+                      <div className="p-2 space-y-2 max-h-60 overflow-y-auto text-[10px]">
+                        {[
+                          {
+                            id: 'ref-flowchart',
+                            name: 'Flowchart with Colors',
+                            code: `flowchart LR\n  A[Start]:::blue --> B{Valid?}:::gray\n  B -- Yes --> C([Done]):::green\n  B -- No --> D[Error]:::red`,
+                          },
+                          {
+                            id: 'ref-dfd',
+                            name: 'Data Flow (DFD)',
+                            code: `dfdDiagram LR\n  entity Customer as "Online Customer"\n  process Order as "1.0 Process Order"\n  store DB as "D1 Orders DB"\n  Customer --> Order : Order Info\n  Order --> DB : Save Record`,
+                          },
+                          {
+                            id: 'ref-usecase',
+                            name: 'Use Case',
+                            code: `usecaseDiagram LR\n  actor Customer\n  actor Admin\n  usecase Login as "Authenticate"\n  usecase Checkout as "Place Order"\n  Customer --> Login\n  Customer --> Checkout\n  Admin --> Login`,
+                          },
+                          {
+                            id: 'ref-activity',
+                            name: 'Activity Workflow',
+                            code: `activityDiagram TD\n  start\n  action Step1 as "Prepare Data"\n  decision Check as "Valid?"\n  action Log as "Record Error"\n  end Done\n  start --> Step1\n  Step1 --> Check\n  Check -- Yes --> Done\n  Check -- No --> Log\n  Log --> Done`,
+                          },
+                          {
+                            id: 'ref-erd',
+                            name: 'ERD Database Schema',
+                            code: `Table: Users\n- id uuid pk\n- email text\n- role text\n\nTable: Orders\n- id uuid pk\n- user_id uuid fk\n- total numeric\n\nUsers --> Orders: places`,
+                          },
+                          {
+                            id: 'ref-sequence',
+                            name: 'Sequence Flow',
+                            code: `sequenceDiagram\n  Client->>API: /auth/login\n  API->>DB: Query User Record\n  DB-->>API: User Data\n  API-->>Client: 200 OK + JWT`,
+                          },
+                        ].map((ref) => (
+                          <div key={ref.id} className="border border-line bg-paper p-1.5">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="font-bold text-ink text-[10px]">{ref.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCodeText(ref.code);
+                                  handleCopySnippet(ref.id, ref.code);
+                                }}
+                                className="px-1.5 py-0.5 text-[9px] font-bold border border-ink bg-paper hover:bg-blueprint hover:text-paper transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Load into editor"
+                              >
+                                {copiedSnippetId === ref.id ? (
+                                  <>
+                                    <Check className="w-2.5 h-2.5 text-blueprint" />
+                                    <span>Loaded</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-2.5 h-2.5" />
+                                    <span>Load</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <pre className="text-[9.5px] font-mono bg-[#101417] text-[#E2E8F0] p-1.5 overflow-x-auto whitespace-pre leading-tight">
+                              {ref.code}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="text-[9.5px] text-ink-soft border-t border-line pt-2 leading-tight">
-                    Supports <code className="text-ink font-bold">flowchart LR/TD</code>, <code className="text-ink font-bold">A[(DB)]</code>, <code className="text-ink font-bold">A([Pill])</code>, <code className="text-ink font-bold">A{`{Diamond}`}</code>, <code className="text-ink font-bold">erDiagram</code>, <code className="text-ink font-bold">sequenceDiagram</code>, & chained arrows <code className="text-ink font-bold">A --&gt; B --&gt; C</code>.
+                    Supports <code className="text-ink font-bold">flowchart</code>, <code className="text-ink font-bold">dfdDiagram</code>, <code className="text-ink font-bold">usecaseDiagram</code>, <code className="text-ink font-bold">activityDiagram</code>, <code className="text-ink font-bold">erDiagram</code>, <code className="text-ink font-bold">sequenceDiagram</code>, &amp; color tags like <code className="text-ink font-bold">:::blue</code>, <code className="text-ink font-bold">:::green</code>, <code className="text-ink font-bold">:::red</code>.
                   </div>
                 </>
               ) : (
@@ -2762,7 +2921,7 @@ export const Editor: React.FC = () => {
                 const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
                 
                 const colorVal = node.width || 1;
-                const applyShadow = !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
+                const applyShadow = !isDiamond && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
                 
                 let customBoxShadow = '';
                 if (applyShadow) {
@@ -2792,11 +2951,11 @@ export const Editor: React.FC = () => {
                 } else if (node.type === 'terminal') {
                   shapeClasses = "rounded-[20px] bg-paper-raised border-ink flex items-center justify-center p-2";
                 } else if (node.type === 'dfd-store') {
-                  shapeClasses = "border-y border-x-0 border-ink bg-paper-raised flex flex-col justify-center p-2";
+                  shapeClasses = "border-y-2 border-l-2 border-r-0 border-ink bg-paper-raised flex flex-row p-0";
                 } else if (node.type === 'dfd-entity') {
                   shapeClasses = "border-ink bg-paper-raised flex flex-col justify-between p-4";
                 } else if (node.type === 'dfd-process') {
-                  shapeClasses = "border-ink bg-paper-raised flex flex-col p-0";
+                  shapeClasses = "rounded-lg border-2 border-ink bg-paper-raised flex flex-col p-0";
                 } else if (node.type === 'usecase-actor') {
                   shapeClasses = "flex flex-col items-center justify-center p-1 bg-transparent border-0 select-none shadow-none";
                 } else if (node.type === 'usecase-oval') {
@@ -2821,6 +2980,8 @@ export const Editor: React.FC = () => {
                     data-canvas-node-id={node.id}
                     onMouseDown={(e) => handleNodeMouseDown(e, node)}
                     onMouseUp={(e) => handleNodeMouseUp(e, node)}
+                    onMouseEnter={() => setHoveredNodeId(node.id)}
+                    onMouseLeave={() => setHoveredNodeId((curr) => curr === node.id ? null : curr)}
                     onContextMenu={(e) => handleContextMenu(e, node.id)}
                     style={{
                       left: `${node.x}px`,
@@ -2831,6 +2992,9 @@ export const Editor: React.FC = () => {
                       boxShadow: customBoxShadow || undefined,
                       borderStyle: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? (nodeBorderStyle === 'none' ? 'none' : nodeBorderStyle) : undefined,
                       borderWidth: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? nodeBorderWidth : undefined,
+                      borderRightWidth: node.type === 'dfd-store' ? '0px' : undefined,
+                      borderRightStyle: node.type === 'dfd-store' ? 'none' : undefined,
+                      borderRightColor: node.type === 'dfd-store' ? 'transparent' : undefined,
                     }}
                     className={`absolute pointer-events-auto select-none ${
                       draggedNodeId === node.id ? 'cursor-grabbing z-20 shadow-xl' : isSelected ? 'cursor-grab' : 'cursor-default'
@@ -2838,12 +3002,14 @@ export const Editor: React.FC = () => {
                       isSelected && !isDiamond
                         ? nodeBorderStyle === 'none'
                           ? '!border !border-dashed !border-blueprint'
-                          : 'border-blueprint !border-2'
+                          : node.type === 'dfd-store'
+                            ? '!border-y-2 !border-l-2 !border-r-0 !border-blueprint'
+                            : 'border-blueprint !border-2'
                         : ''
                     }`}
                   >
                     {/* Connection ports (visible on node selection in select mode or active port connection lines) */}
-                    {(isSelected || connectingPort) && activeMode === 'select' && (
+                    {(isSelected || connectingPort || hoveredNodeId === node.id) && activeMode === 'select' && (
                       <>
                         <div 
                           onMouseDown={(e) => handlePortMouseDown(e, node.id, 'top')} 
@@ -2977,18 +3143,18 @@ export const Editor: React.FC = () => {
                         </div>
                       </div>
                     ) : node.type === 'dfd-store' ? (
-                      <div 
-                        className={`font-mono select-none h-full flex items-center px-2 ${flexAlignClass} ${node.isBold === false ? 'font-normal' : 'font-bold'}`}
-                        style={textStyleObj}
-                      >
-                        {node.label}
-                      </div>
+                      <div className="w-full h-full flex flex-row items-center select-none overflow-hidden">{(() => { const { id: storeId, name: storeName } = parseDfdStoreLabel(node.label); return (<><div className="w-10 h-full bg-paper border-r-2 border-ink flex items-center justify-center font-mono font-bold text-[10px] text-ink-soft select-none flex-shrink-0">{storeId}</div><div className={`flex-1 px-3 font-mono truncate ${node.textAlign === 'right' ? 'text-right' : node.textAlign === 'center' ? 'text-center' : 'text-left'} ${node.isBold === false ? 'font-normal' : 'font-bold'}`} style={textStyleObj}>{storeName}</div></>); })()}</div>
+
+
+
+
+
                     ) : node.type === 'dfd-process' ? (
                       <div className="flex-1 flex flex-col h-full overflow-hidden select-none">
                         {(() => {
-                          const splitIdx = node.label.indexOf(' ');
-                          const processId = splitIdx !== -1 ? node.label.substring(0, splitIdx) : '1.0';
-                          const processName = splitIdx !== -1 ? node.label.substring(splitIdx + 1) : node.label;
+                          const { id: processId, name: processName } = parseDfdProcessLabel(node.label);
+
+
                           return (
                             <>
                               <div className="bg-paper border-b border-ink py-1 text-center font-bold font-mono text-[9px] text-ink-soft select-none truncate">

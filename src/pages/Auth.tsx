@@ -16,6 +16,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Logo } from '../components/ui/Logo';
 import { authService } from '../services/authService';
+import { adminService } from '../services/adminService';
 
 export const Auth: React.FC = () => {
   const navigate = useNavigate();
@@ -27,6 +28,24 @@ export const Auth: React.FC = () => {
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [registrationPolicy, setRegistrationPolicy] = useState<'open' | 'invite_only' | 'disabled'>(() => {
+    return adminService.getSystemSettingsSync().registration_policy || 'open';
+  });
+  const [inviteCode, setInviteCode] = useState('');
+
+  useEffect(() => {
+    void adminService.getSystemSettings().then((s) => {
+      if (s?.registration_policy) {
+        setRegistrationPolicy(s.registration_policy);
+      }
+    });
+    const unsubscribe = adminService.onSettingsChange((s) => {
+      if (s?.registration_policy) {
+        setRegistrationPolicy(s.registration_policy);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const isSignUp = authMode === 'signup';
   const isForgot = authMode === 'forgot';
@@ -113,6 +132,16 @@ export const Auth: React.FC = () => {
       } finally {
         setIsLoading(false);
       }
+      return;
+    }
+
+    if (isSignUp && registrationPolicy === 'disabled') {
+      setError('New developer registrations are currently disabled by platform administrators.');
+      return;
+    }
+
+    if (isSignUp && registrationPolicy === 'invite_only' && !inviteCode.trim()) {
+      setError('An invitation code is required to register an account.');
       return;
     }
 
@@ -217,13 +246,19 @@ export const Auth: React.FC = () => {
                 setError('');
                 setInfoMessage('');
               }}
-              className={`py-2 px-3 flex items-center justify-center font-semibold transition-colors cursor-pointer border ${
+              className={`py-2 px-3 flex items-center justify-center gap-1.5 font-semibold transition-colors cursor-pointer border ${
                 authMode === 'signup' 
                   ? 'bg-ink text-paper border-ink shadow-sm' 
                   : 'bg-transparent text-ink-soft border-transparent hover:text-ink hover:bg-paper-raised'
               }`}
             >
-              Create Account
+              <span>Create Account</span>
+              {registrationPolicy === 'disabled' && (
+                <span className="text-[9px] uppercase px-1 py-0.2 bg-signal/20 text-signal font-mono font-bold">closed</span>
+              )}
+              {registrationPolicy === 'invite_only' && (
+                <span className="text-[9px] uppercase px-1 py-0.2 bg-blueprint/20 text-blueprint font-mono font-bold">invite</span>
+              )}
             </button>
           </div>
         ) : (
@@ -307,7 +342,44 @@ export const Auth: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {isSignUp && registrationPolicy === 'disabled' ? (
+            <div className="border border-line bg-paper-raised p-6 font-mono text-[12px] flex flex-col items-center text-center gap-3">
+              <span className="text-[11px] font-bold text-signal uppercase tracking-wider border border-signal/30 bg-signal/5 px-2.5 py-1">
+                // registration_closed
+              </span>
+              <p className="text-ink-soft text-[12.5px] leading-relaxed max-w-sm">
+                New developer account registrations are currently disabled by platform administrators.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAuthMode('signin')}
+                className="mt-1 px-4 py-2 border border-ink bg-paper hover:bg-paper-raised text-ink font-bold text-[12px] cursor-pointer transition-colors"
+              >
+                ← back_to_sign_in()
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              {/* If Sign Up and Invite-Only Policy */}
+              {isSignUp && registrationPolicy === 'invite_only' && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[12px] font-medium text-ink-soft" htmlFor="inviteCode">
+                      Invitation Code
+                    </label>
+                    <span className="text-[10px] font-mono text-signal uppercase font-bold">// required</span>
+                  </div>
+                  <input
+                    id="inviteCode"
+                    type="text"
+                    required
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    className="w-full border border-line bg-paper px-3 py-2 text-[14px] font-mono focus:border-ink focus:outline-none placeholder-ink-soft/50 uppercase"
+                    placeholder="INVITE-XXXX-XXXX"
+                  />
+                </div>
+              )}
             {/* If Sign Up: Full Name */}
             {isSignUp && (
               <div className="flex flex-col gap-1.5">
@@ -449,9 +521,10 @@ export const Auth: React.FC = () => {
               </div>
             )}
           </form>
+          )}
 
-          {/* Social Sign In (Only in signin/signup modes) */}
-          {!isForgot && (
+          {/* Social Sign In (Only in signin/signup modes, hidden when registration disabled) */}
+          {!isForgot && !(isSignUp && registrationPolicy === 'disabled') && (
             <>
               <div className="relative my-5">
                 <div className="absolute inset-0 flex items-center">

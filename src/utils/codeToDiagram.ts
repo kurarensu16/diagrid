@@ -1,16 +1,23 @@
 import { type CanvasNode, type CanvasEdge, type EdgeMarkerType, type Diagram } from '../services/mockDb';
+import { parseDiagramSource, type DiagramSourceSyntax } from './diagramSourceParser';
 
 export interface CodeToDiagramResult {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   warning?: string;
   diagnostics: CodeDiagnostic[];
+  syntax: DiagramSourceSyntax;
 }
 
 export interface CodeDiagnostic {
   line: number;
+  column: number;
+  endColumn: number;
+  severity: 'warning' | 'error';
+  code: string;
   message: string;
   source: string;
+  suggestion?: string;
 }
 
 export type LayoutDirection = 'LR' | 'TD';
@@ -22,7 +29,22 @@ export interface ParsedNodeInfo {
   fields?: string[];
   role?: string;
   subgraph?: string;
+  colorHint?: string;
 }
+
+export const COLOR_HINTS: Record<string, { fill: string; accent?: string }> = {
+  blue: { fill: '#EFF6FF', accent: '#1E5C8C' },
+  blueprint: { fill: '#EFF6FF', accent: '#1E5C8C' },
+  red: { fill: '#FEF2F2', accent: '#D45B33' },
+  signal: { fill: '#FEF2F2', accent: '#D45B33' },
+  green: { fill: '#F0FDF4', accent: '#2E7D32' },
+  emerald: { fill: '#F0FDF4', accent: '#2E7D32' },
+  amber: { fill: '#FFFBEB', accent: '#D97706' },
+  purple: { fill: '#FAF5FF', accent: '#7C3AED' },
+  gray: { fill: '#F3F4F6', accent: '#4B5563' },
+  white: { fill: '#FFFFFF', accent: '#15191C' },
+  paper: { fill: '#FFFFFF', accent: '#15191C' },
+};
 
 export interface ParsedEdgeInfo {
   source: string;
@@ -215,321 +237,16 @@ export const parseCodeToDiagram = (
   direction: LayoutDirection = 'LR',
   startOffset: { x: number; y: number } = { x: 80, y: 80 }
 ): CodeToDiagramResult => {
-  const rawLines = rawCode.split('\n');
-  const entries = rawLines
-    .map((raw, index) => ({ text: raw.trim(), line: index + 1 }))
-    .filter(({ text }) => text.length > 0 && !text.startsWith('%%') && !text.startsWith('//'));
-  const lines = entries.map(({ text }) => text);
-  const diagnostics: CodeDiagnostic[] = [];
+  const parsedSource = parseDiagramSource(rawCode, direction);
+  const diagnostics: CodeDiagnostic[] = parsedSource.diagnostics;
 
-  if (lines.length === 0) {
-    return { nodes: [], edges: [], diagnostics };
+  if (parsedSource.nodes.length === 0) {
+    return { nodes: [], edges: [], diagnostics, syntax: parsedSource.syntax };
   }
 
-  // Detect Diagram Header & Direction
-  let effectiveDir = direction;
-
-  const firstLine = lines[0].toLowerCase();
-  const isSequenceDiagram = firstLine.startsWith('sequencediagram');
-  if (firstLine.startsWith('flowchart') || firstLine.startsWith('graph')) {
-    if (firstLine.includes('td') || firstLine.includes('tb')) effectiveDir = 'TD';
-    if (firstLine.includes('lr') || firstLine.includes('rl')) effectiveDir = 'LR';
-  }
-
-  const nodeMap = new Map<string, ParsedNodeInfo>();
-  const edges: ParsedEdgeInfo[] = [];
-
-  // Helper to ensure node exists or register it
-  const ensureNode = (id: string, label?: string, type: CanvasNode['type'] = 'process', fields?: string[], explicit = false) => {
-    const cleanId = id.trim();
-    if (!cleanId) return;
-    if (!nodeMap.has(cleanId)) {
-      nodeMap.set(cleanId, {
-        id: cleanId,
-        label: label ? stripQuotes(label) : cleanId,
-        type,
-        fields
-      });
-    } else {
-      const existing = nodeMap.get(cleanId)!;
-      if (label && (explicit || (existing.label === cleanId && label !== cleanId))) {
-        existing.label = stripQuotes(label);
-        existing.type = type;
-      }
-      if (fields && fields.length > 0) {
-        existing.fields = fields;
-        existing.type = 'table';
-      }
-    }
-  };
-
-  // --- ER Diagram Block Parsing Mode ---
-  let inErEntity = false;
-  let currentErTable: ParsedNodeInfo | null = null;
-  let currentTableShorthand: ParsedNodeInfo | null = null;
-  let currentSubgraph: string | null = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-
-    // Skip diagram declaration headers
-    if (/^(flowchart|graph|sequenceDiagram|erDiagram|classDiagram)/i.test(line)) {
-      continue;
-    }
-
-    // Subgraph boundary tracking
-    const subgraphMatch = line.match(/^subgraph\s+([a-zA-Z0-9_.-]+)(?:\s*\[(.*?)\])?/i);
-    if (subgraphMatch) {
-      currentSubgraph = subgraphMatch[2] ? stripQuotes(subgraphMatch[2]) : subgraphMatch[1];
-      continue;
-    }
-    if (/^end$/i.test(line)) {
-      currentSubgraph = null;
-      inErEntity = false;
-      currentErTable = null;
-      continue;
-    }
-
-    // Skip styling & class annotations
-    if (/^(classDef|style|class|linkStyle|click|accTitle|accDescr)\s+/i.test(line)) {
-      continue;
-    }
-
-    // --- 1. Mermaid erDiagram Entity Block: ENTITY { type name PK } ---
-    const erEntityHeader = line.match(/^([a-zA-Z0-9_.-]+)\s*\{$/i);
-    if (erEntityHeader) {
-      inErEntity = true;
-      const tableName = erEntityHeader[1];
-      currentErTable = {
-        id: `tbl-${tableName.toLowerCase()}`,
-        label: tableName,
-        type: 'table',
-        fields: []
-      };
-      nodeMap.set(currentErTable.id, currentErTable);
-      continue;
-    }
-
-    if (inErEntity && currentErTable) {
-      if (line === '}') {
-        inErEntity = false;
-        currentErTable = null;
-        continue;
-      }
-      // Field row e.g. "string user_id PK" or "int count" or "uuid id PK,FK"
-      const fieldParts = line.replace(/[,;]/g, '').trim().split(/\s+/);
-      if (fieldParts.length >= 2) {
-        const type = fieldParts[0];
-        const name = fieldParts[1];
-        const isPk = fieldParts.some(p => p.toUpperCase() === 'PK');
-        const isFk = fieldParts.some(p => p.toUpperCase() === 'FK');
-        const badge = isPk ? 'pk' : isFk ? 'fk' : '';
-        const fieldStr = `${name} ${type} ${badge}`.trim();
-        currentErTable.fields = currentErTable.fields || [];
-        currentErTable.fields.push(fieldStr);
-      } else if (fieldParts.length === 1 && fieldParts[0]) {
-        currentErTable.fields = currentErTable.fields || [];
-        currentErTable.fields.push(fieldParts[0]);
-      }
-      continue;
-    }
-
-    // --- 2. Diagrid Table Shorthand: "Table: Users" or "Table Users" ---
-    const tableHeaderMatch = line.match(/^Table[:\s]+([a-zA-Z0-9_.-]+)/i);
-    if (tableHeaderMatch) {
-      const tableName = tableHeaderMatch[1];
-      currentTableShorthand = {
-        id: `tbl-${tableName.toLowerCase()}`,
-        label: tableName,
-        type: 'table',
-        fields: []
-      };
-      nodeMap.set(currentTableShorthand.id, currentTableShorthand);
-      continue;
-    }
-
-    if (currentTableShorthand && (line.startsWith('-') || line.startsWith('*'))) {
-      const fieldDef = line.replace(/^[-*]\s*/, '').trim();
-      if (fieldDef) {
-        currentTableShorthand.fields = currentTableShorthand.fields || [];
-        currentTableShorthand.fields.push(fieldDef);
-      }
-      continue;
-    } else if (!line.startsWith('-') && !line.startsWith('*')) {
-      currentTableShorthand = null;
-    }
-
-    // Table shorthand references use the table IDs already created above.
-    const tableRelMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*-->\s*([a-zA-Z0-9_.-]+)\s*:\s*(.+)$/);
-    if (tableRelMatch) {
-      const source = `tbl-${tableRelMatch[1].toLowerCase()}`;
-      const target = `tbl-${tableRelMatch[2].toLowerCase()}`;
-      if (nodeMap.has(source) && nodeMap.has(target)) {
-        edges.push({ source, target, label: tableRelMatch[3].trim(), style: 'solid' });
-        continue;
-      }
-    }
-
-    // --- 3. Mermaid erDiagram Relationship: ENTITY1 ||--o{ ENTITY2 : "places" ---
-    const erRelMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*([|o}{.-]+)\s*([a-zA-Z0-9_.-]+)\s*:\s*(?:["'](.*?)["']|(.*?))$/i);
-    if (erRelMatch) {
-      const srcId = `tbl-${erRelMatch[1].toLowerCase()}`;
-      const tgtId = `tbl-${erRelMatch[3].toLowerCase()}`;
-      const relSymbol = erRelMatch[2];
-      const label = (erRelMatch[4] || erRelMatch[5] || '').trim();
-      
-      ensureNode(srcId, erRelMatch[1], 'table');
-      ensureNode(tgtId, erRelMatch[3], 'table');
-      
-      const parsedRel = parseErRelationshipSymbol(relSymbol);
-      edges.push({
-        source: srcId,
-        target: tgtId,
-        label,
-        style: parsedRel.style,
-        sourceMarker: parsedRel.sourceMarker,
-        targetMarker: parsedRel.targetMarker
-      });
-      continue;
-    }
-
-    // --- 4. Sequence Diagram Statements: A->>B: Message or A-->>B: Reply ---
-    const seqMatch = isSequenceDiagram ? line.match(/^(.+?)\s*(--?>>?)\s*(.+?)\s*:\s*(.*)$/i) : null;
-    if (seqMatch) {
-      const src = parseNodeToken(seqMatch[1]);
-      const arrowSymbol = seqMatch[2];
-      const tgt = parseNodeToken(seqMatch[3]);
-      const label = seqMatch[4].trim();
-
-      ensureNode(src.id, src.label, 'process');
-      ensureNode(tgt.id, tgt.label, 'process');
-
-      const isDashed = arrowSymbol.includes('--');
-      edges.push({
-        source: src.id,
-        target: tgt.id,
-        label,
-        style: isDashed ? 'dashed' : 'solid'
-      });
-      continue;
-    }
-
-    // Participant declarations e.g. participant A as Alice or actor User
-    const participantMatch = line.match(/^(?:participant|actor)\s+([a-zA-Z0-9_.-]+)(?:\s+as\s+(.*))?$/i);
-    if (participantMatch) {
-      const id = participantMatch[1];
-      const label = participantMatch[2] ? stripQuotes(participantMatch[2]) : id;
-      ensureNode(id, label, 'process');
-      continue;
-    }
-
-    // --- 5. Flowchart Chained Connectors and Multi-arrow lines ---
-    // Supports:
-    // A --> B --> C --> D
-    // A -- Yes --> B
-    // A -->|Label| B
-    // A -.-> B
-    // A ==> B
-    // A --- B
-    // A -> B: Label
-    // A & B --> C & D
-    
-    // Regular expression to split connectors while keeping edge labels
-    // Matches: -->, -.->, ==>, ---, -- text -->, -. text .->, -->|text|, -.->|text|, ==>|text|, == text ==>
-    const arrowSplitRegex = /(\s*(?:--\s*.*?\s*-->|-\.\s*.*?\s*\.->|==\s*.*?\s*==>|-->\|.*?\||-\.->\|.*?\||==>\|.*?\||-->|-\.->|==>|---|->|<-->)\s*)/g;
-    const parts = line.split(arrowSplitRegex).filter(p => p !== undefined && p.trim().length > 0);
-
-    if (parts.length >= 3) {
-      // It's a chained expression: node [connector node]+
-      let prevNodes: ParsedNodeInfo[] = [];
-
-      for (let pIdx = 0; pIdx < parts.length; pIdx++) {
-        const part = parts[pIdx].trim();
-        const isConnector = arrowSplitRegex.test(part);
-        arrowSplitRegex.lastIndex = 0; // reset regex state
-
-        if (!isConnector) {
-          // It's a node or multiple nodes joined by '&'
-          const nodeTokens = part.split('&').map(t => parseNodeToken(t.trim()));
-          nodeTokens.forEach(n => {
-            ensureNode(n.id, n.label, n.type, undefined, n.label !== n.id || n.type !== 'process');
-            if (currentSubgraph) {
-              const nodeObj = nodeMap.get(n.id);
-              if (nodeObj) nodeObj.subgraph = currentSubgraph;
-            }
-          });
-
-          // If there were preceding nodes connected by an arrow
-          if (prevNodes.length > 0 && pIdx >= 2) {
-            const connectorPart = parts[pIdx - 1].trim();
-            
-            // Extract label and style from connector
-            let edgeLabel = '';
-            let edgeStyle: 'solid' | 'dashed' = 'solid';
-            let edgeArrow: 'end' | 'none' | 'both' = 'end';
-
-            // Pipe label: -->|label|
-            const pipeMatch = connectorPart.match(/(?:-->|-\.->|==>)\|(.*?)\|/);
-            if (pipeMatch) {
-              edgeLabel = pipeMatch[1].trim();
-            } else {
-              // Middle label: -- label --> or -. label .-> or == label ==>
-              const middleMatch = connectorPart.match(/(?:--|-\.|==)\s*(.*?)\s*(?:-->|\.->|==>)/);
-              if (middleMatch && middleMatch[1] && !middleMatch[1].startsWith('>')) {
-                edgeLabel = middleMatch[1].trim();
-              }
-            }
-
-            if (connectorPart.includes('-.-') || connectorPart.includes('.-') || connectorPart.startsWith('-.')) {
-              edgeStyle = 'dashed';
-            }
-            if (connectorPart === '---') {
-              edgeArrow = 'none';
-            } else if (connectorPart.includes('<-->')) {
-              edgeArrow = 'both';
-            }
-
-            // Connect every prev node to every target node
-            prevNodes.forEach(src => {
-              nodeTokens.forEach(tgt => {
-                edges.push({
-                  source: src.id,
-                  target: tgt.id,
-                  label: edgeLabel || undefined,
-                  style: edgeStyle,
-                  arrow: edgeArrow
-                });
-              });
-            });
-          }
-
-          prevNodes = nodeTokens;
-        }
-      }
-      continue;
-    }
-
-    // --- 6. Standalone Node Definition: A[Start Step] or A((Start)) or A{Check} ---
-    if (/^[a-zA-Z0-9_.-]+\s*(\[|\(|\{|>)/.test(line)) {
-      const parsed = parseNodeToken(line);
-      ensureNode(parsed.id, parsed.label, parsed.type, undefined, true);
-      if (currentSubgraph) {
-        const nodeObj = nodeMap.get(parsed.id);
-        if (nodeObj) nodeObj.subgraph = currentSubgraph;
-      }
-      continue;
-    }
-
-    diagnostics.push({
-      line: entries[i].line,
-      message: 'Unsupported or unrecognized statement',
-      source: line,
-    });
-  }
-
-  if (nodeMap.size === 0) {
-    return { nodes: [], edges: [], diagnostics };
-  }
+  const effectiveDir = parsedSource.direction;
+  const nodeMap = new Map<string, ParsedNodeInfo>(parsedSource.nodes.map(node => [node.id, node]));
+  const edges: ParsedEdgeInfo[] = [...parsedSource.edges];
 
   // --- Automatic Hierarchical DAG Layout Algorithm ---
   const isHorizontal = effectiveDir === 'LR';
@@ -607,12 +324,43 @@ export const parseCodeToDiagram = (
   const COL_GAP = isHorizontal ? 140 : 120;
 
   const getParsedNodeDimensions = (parsed: ParsedNodeInfo) => {
-    const isTable = parsed.type === 'table';
-    const isDecision = parsed.type === 'decision';
-    return {
-      width: isTable ? 180 : isDecision ? 100 : 140,
-      height: isTable ? Math.max(48, 32 + (parsed.fields?.length || 0) * 24) : isDecision ? 100 : 48
-    };
+    switch (parsed.type) {
+      case 'table':
+        return {
+          width: 180,
+          height: Math.max(48, 32 + (parsed.fields?.length || 0) * 24),
+        };
+      case 'decision':
+      case 'activity-decision':
+        return { width: 96, height: 96 };
+      case 'terminal':
+        return { width: 120, height: 38 };
+      case 'dfd-store':
+        return { width: 160, height: 48 };
+      case 'dfd-entity':
+        return { width: 120, height: 56 };
+      case 'dfd-process':
+        return { width: 130, height: 64 };
+      case 'usecase-actor':
+        return { width: 70, height: 90 };
+      case 'usecase-oval':
+        return { width: 130, height: 52 };
+      case 'usecase-boundary':
+        return { width: 360, height: 300 };
+      case 'activity-start':
+        return { width: 32, height: 32 };
+      case 'activity-end':
+        return { width: 36, height: 36 };
+      case 'activity-action':
+        return { width: 150, height: 48 };
+      case 'activity-fork':
+        return { width: 180, height: 12 };
+      case 'text':
+        return { width: 140, height: 40 };
+      case 'process':
+      default:
+        return { width: 140, height: 48 };
+    }
   };
 
   const layerDimensions = new Map<number, { primary: number; cross: number }>();
@@ -677,6 +425,14 @@ export const parseCodeToDiagram = (
       x = Math.max(40, Math.round(x / 20) * 20);
       y = Math.max(40, Math.round(y / 20) * 20);
 
+      const colorKey = (parsed.colorHint || parsed.role || '').toLowerCase();
+      let fillColor: string | undefined;
+      let shadowAccent: string | undefined;
+      if (colorKey && COLOR_HINTS[colorKey]) {
+        fillColor = COLOR_HINTS[colorKey].fill;
+        shadowAccent = COLOR_HINTS[colorKey].accent;
+      }
+
       const canvasNode: CanvasNode = {
         id: newUuid,
         type: parsed.type,
@@ -685,7 +441,9 @@ export const parseCodeToDiagram = (
         y,
         fields: parsed.fields,
         width: dimensions.width,
-        height: dimensions.height
+        height: dimensions.height,
+        fillColor,
+        shadowAccent
       };
 
       finalNodes.push(canvasNode);
@@ -785,6 +543,7 @@ export const parseCodeToDiagram = (
     nodes: finalNodes,
     edges: finalEdges,
     diagnostics,
+    syntax: parsedSource.syntax,
   };
 };
 
@@ -1038,10 +797,15 @@ Projects --> Tasks: contains`
     badge: 'DFD Pipeline',
     type: 'dfd',
     direction: 'LR' as LayoutDirection,
-    code: `flowchart LR
-    Client([Client Web/Mobile]) --> Ingress[Ingress Processor]
-    Ingress --> DataStore[(Database Store)]
-    Ingress --> AsyncWorker[[Async Background Worker]]`
+    code: `dfdDiagram LR
+    entity Client as "Client Web/Mobile"
+    process Ingress as "1.0 Ingress Processor"
+    store DataStore as "D1 Database Store"
+    process AsyncWorker as "2.0 Background Worker"
+
+    Client --> Ingress : Raw Data
+    Ingress --> DataStore : Save Record
+    Ingress --> AsyncWorker : Dispatch Job`
   },
   {
     id: 'usecase-system',
@@ -1049,10 +813,16 @@ Projects --> Tasks: contains`
     badge: 'Use Case',
     type: 'usecase',
     direction: 'LR' as LayoutDirection,
-    code: `flowchart LR
-    User([End User]) --> Login([Authenticate])
-    User --> Browse([Browse Content])
-    Admin([System Admin]) --> Audit([Audit Logs])`
+    code: `usecaseDiagram LR
+    actor User as "End User"
+    actor Admin as "System Admin"
+    usecase Login as "Authenticate"
+    usecase Browse as "Browse Content"
+    usecase Audit as "Audit Logs"
+
+    User --> Login
+    User --> Browse
+    Admin --> Audit`
   },
   {
     id: 'activity-workflow',
@@ -1060,11 +830,17 @@ Projects --> Tasks: contains`
     badge: 'Activity',
     type: 'activity',
     direction: 'TD' as LayoutDirection,
-    code: `flowchart TD
-    Start([Start Task]) --> Action[Execute Action]
-    Action --> Validate{Passed Checks?}
-    Validate -- Yes --> Finish([Complete])
-    Validate -- No --> LogError[Record Error]
+    code: `activityDiagram TD
+    start
+    action Action as "Execute Action"
+    decision Validate as "Passed Checks?"
+    action LogError as "Record Error"
+    end Finish as "Complete"
+
+    start --> Action
+    Action --> Validate
+    Validate -- Yes --> Finish
+    Validate -- No --> LogError
     LogError --> Finish`
   }
 ];

@@ -23,6 +23,10 @@ export const useCanvasTransform = ({
 }: UseCanvasTransformProps) => {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panRef = useRef(pan);
+  panRef.current = pan;
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0 });
 
@@ -328,30 +332,48 @@ export const useCanvasTransform = ({
     return false;
   }, []);
 
-  // Wheel Zoom & 2D Pan Scroll
-  const handleCanvasWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
+  // Native non-passive wheel listener attached to window
+  // Crucial: Listening on window with { passive: false } guarantees e.preventDefault() intercepts Ctrl+Scroll
+  // and completely blocks the browser from zooming the webpage, while smoothly zooming the canvas under the cursor.
+  useEffect(() => {
+    const onWindowWheel = (e: WheelEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const isOverCanvas =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+
       if (e.ctrlKey || e.metaKey) {
-        // Zoom at mouse location
-        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-        const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.25), 3);
+        // ALWAYS prevent default browser zoom when Ctrl/Cmd is held
+        e.preventDefault();
 
-        if (canvasRef.current) {
-          const rect = canvasRef.current.getBoundingClientRect();
-          const mouseX = e.clientX - rect.left;
-          const mouseY = e.clientY - rect.top;
+        if (!isOverCanvas) return;
 
-          const newPanX = mouseX - (mouseX - pan.x) * (newZoom / zoom);
-          const newPanY = mouseY - (mouseY - pan.y) * (newZoom / zoom);
+        const currentZoom = zoomRef.current;
+        const currentPan = panRef.current;
 
-          setZoom(newZoom);
-          setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
-        } else {
-          setZoom(newZoom);
-        }
-      } else {
-        // 2D Scroll
+        // Smooth factor supporting both discrete mouse wheel notches (deltaY ~ 100) and trackpad pinch
+        const factor = Math.abs(e.deltaY) >= 50
+          ? (e.deltaY < 0 ? 1.1 : 0.9)
+          : Math.exp(-e.deltaY * 0.01);
+
+        const newZoom = Math.min(Math.max(Number((currentZoom * factor).toFixed(3)), 0.2), 3);
+
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const newPanX = mouseX - (mouseX - currentPan.x) * (newZoom / currentZoom);
+        const newPanY = mouseY - (mouseY - currentPan.y) * (newZoom / currentZoom);
+
+        setZoom(newZoom);
+        setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
+      } else if (isOverCanvas) {
+        // 2D Pan Scroll over canvas
+        e.preventDefault();
         let deltaX = e.deltaX;
         let deltaY = e.deltaY;
         if (e.shiftKey && deltaX === 0) {
@@ -364,9 +386,15 @@ export const useCanvasTransform = ({
           y: Math.round(prev.y - deltaY),
         }));
       }
-    },
-    [zoom, pan, canvasRef]
-  );
+    };
+
+    window.addEventListener('wheel', onWindowWheel, { passive: false });
+    return () => {
+      window.removeEventListener('wheel', onWindowWheel);
+    };
+  }, [canvasRef]);
+
+  const handleCanvasWheel = useCallback((_e: React.WheelEvent) => {}, []);
 
   return {
     zoom,
