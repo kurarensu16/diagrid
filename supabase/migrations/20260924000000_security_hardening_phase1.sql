@@ -290,6 +290,60 @@ begin
 end;
 $$;
 
+-- Some legacy deployments predate the aggregated admin dashboard RPC. Create
+-- it before narrowing execute privileges so the migration remains portable.
+create or replace function public.get_platform_stats()
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  total_users int;
+  active_users_24h int;
+  total_projects int;
+  total_diagrams int;
+  diagrams_by_type jsonb;
+  signups_last_7_days int[];
+begin
+  if not public.is_admin() then
+    raise exception 'Unauthorized: Admin role required';
+  end if;
+
+  select count(*) into total_users from public.profiles;
+  select count(*) into active_users_24h
+  from public.profiles
+  where updated_at >= now() - interval '24 hours';
+  select count(*) into total_projects from public.projects;
+  select count(*) into total_diagrams from public.diagrams;
+
+  select coalesce(jsonb_object_agg(type, count), '{}'::jsonb)
+  into diagrams_by_type
+  from (
+    select type::text, count(*) as count
+    from public.diagrams
+    group by type
+  ) t;
+
+  select array_agg(coalesce(c, 0) order by d)
+  into signups_last_7_days
+  from (
+    select gs::date as d, count(p.id) as c
+    from generate_series(current_date - interval '6 days', current_date, interval '1 day') gs
+    left join public.profiles p on p.created_at::date = gs::date
+    group by gs::date
+  ) s;
+
+  return jsonb_build_object(
+    'total_users', coalesce(total_users, 0),
+    'active_users_24h', coalesce(active_users_24h, 0),
+    'total_projects', coalesce(total_projects, 0),
+    'total_diagrams', coalesce(total_diagrams, 0),
+    'diagrams_by_type', coalesce(diagrams_by_type, '{}'::jsonb),
+    'signups_last_7_days', coalesce(signups_last_7_days, array[0,0,0,0,0,0,0])
+  );
+end;
+$$;
+
 -- Security-definer functions are callable only by authenticated users and keep
 -- their own is_admin() checks as the authoritative authorization decision.
 revoke all on function public.get_platform_stats() from public, anon;
