@@ -13,9 +13,17 @@ dist-ssr
 *.local
 .env
 .env.*
+.vercel/
+build/
+credentials.json
+*-credentials.json
+service-account*.json
+*.pem
+*.key
 .npm-cache/
 test-results/
 playwright-report/
+/tmp/
 
 # Editor directories and files
 .vscode/*
