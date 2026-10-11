@@ -25,6 +25,7 @@ import {
 import { calculateEdgePath } from '../utils/edgeRouting';
 import { parseDfdStoreLabel, parseDfdProcessLabel } from '../utils/dfdHelpers';
 import { CanvasSpatialIndex } from '../utils/spatialIndex';
+import { getDomNodeIdsForLayering } from '../utils/canvasLayering';
 import { FreehandLayer } from '../components/canvas/FreehandLayer';
 import { EdgeLayer } from '../components/canvas/EdgeLayer';
 import { PropertiesSidebar } from '../components/canvas/PropertiesSidebar';
@@ -134,7 +135,7 @@ const TableNodeContent = React.memo(({ node }: { node: CanvasNode }) => {
 // Complex notation-specific cards keep their legacy DOM implementation until
 // their Canvas equivalents reach feature parity.
 const CANVAS_RENDERABLE_TYPES = new Set<CanvasNode['type']>([
-  'table', 'process', 'decision', 'terminal', 'text', 'usecase-oval',
+  'table', 'process', 'decision', 'terminal', 'text', 'subgraph', 'usecase-oval',
   'activity-start', 'activity-end', 'activity-action', 'activity-decision', 'activity-fork',
 ]);
 
@@ -324,6 +325,7 @@ export const Editor: React.FC = () => {
   const [codeMode, setCodeMode] = useState<'replace' | 'append'>('replace');
   const [codeStatus, setCodeStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const codeLineNumbersRef = useRef<HTMLDivElement>(null);
   const [codePreview, setCodePreview] = useState<{
     source: string;
     direction: LayoutDirection;
@@ -435,6 +437,10 @@ export const Editor: React.FC = () => {
       return;
     }
     const { result, mode } = codePreview;
+    if (result.nodes.length === 0 || result.diagnostics.some(item => item.severity === 'error')) {
+      setCodeStatus({ type: 'error', message: 'Fix the source errors before applying this diagram.' });
+      return;
+    }
     const nextNodes = mode === 'append' ? [...nodes, ...result.nodes] : result.nodes;
     const nextEdges = mode === 'append' ? [...edges, ...result.edges] : result.edges;
     setNodes(nextNodes);
@@ -442,6 +448,7 @@ export const Editor: React.FC = () => {
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
     saveHistoryState(nextNodes, nextEdges, drawings);
+    if (codePreview.direction === 'COMPACT') centerDiagramInView(nextNodes, drawings);
     setCodePreview(null);
     setCodeStatus({
       type: 'success',
@@ -668,20 +675,23 @@ export const Editor: React.FC = () => {
     };
   }, [nodes, edges, pan, zoom, viewportSize, selectedNodeIds, selectedEdgeId, draggedNodeId, connectingPort, spatialIndex]);
 
+  const domNodeIds = useMemo(() => isCanvasSceneActive
+    ? getDomNodeIdsForLayering(visibleNodes, selectedNodeIds, connectingPort?.nodeId, CANVAS_RENDERABLE_TYPES)
+    : new Set(visibleNodes.map(node => node.id)),
+  [isCanvasSceneActive, visibleNodes, selectedNodeIds, connectingPort?.nodeId]);
+
   const staticCanvasNodes = useMemo(() => {
     if (!isCanvasSceneActive) return [];
-    const selectedIds = new Set(selectedNodeIds);
     const settledById = new Map(settledNodes.map((node) => [node.id, node]));
     return visibleNodes
-      .filter((node) => CANVAS_RENDERABLE_TYPES.has(node.type) && !selectedIds.has(node.id) && node.id !== connectingPort?.nodeId)
+      .filter((node) => !domNodeIds.has(node.id))
       .map((node) => settledById.get(node.id) ?? node);
-  }, [isCanvasSceneActive, visibleNodes, selectedNodeIds, connectingPort, settledNodes]);
+  }, [isCanvasSceneActive, visibleNodes, domNodeIds, settledNodes]);
 
   const domNodes = useMemo(() => {
     if (!isCanvasSceneActive) return visibleNodes;
-    const selectedIds = new Set(selectedNodeIds);
-    return visibleNodes.filter((node) => !CANVAS_RENDERABLE_TYPES.has(node.type) || selectedIds.has(node.id) || node.id === connectingPort?.nodeId);
-  }, [isCanvasSceneActive, visibleNodes, selectedNodeIds, connectingPort]);
+    return visibleNodes.filter((node) => domNodeIds.has(node.id));
+  }, [isCanvasSceneActive, visibleNodes, domNodeIds]);
 
   // A static bitmap should not be repainted merely because the active overlay
   // moves. Freeze it during geometry interactions, then refresh once on drop.
@@ -1076,7 +1086,7 @@ export const Editor: React.FC = () => {
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (isCanvasSceneActive && activeMode === 'select' && e.button === 0 && canvasRef.current) {
+    if (activeMode === 'select' && e.button === 0 && canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
       const point = {
         x: (e.clientX - rect.left - pan.x) / zoom,
@@ -1606,12 +1616,11 @@ export const Editor: React.FC = () => {
     const menuWidth = 220;
     const canvasMouseX = (e.clientX - rect.left - pan.x) / zoom;
     const canvasMouseY = (e.clientY - rect.top - pan.y) / zoom;
-    const resolvedNodeId = targetNodeId ?? (isCanvasSceneActive
-      ? spatialIndex.queryPoint(canvasMouseX, canvasMouseY).reverse().find((node) => {
+    const resolvedNodeId = targetNodeId ?? (
+      spatialIndex.queryPoint(canvasMouseX, canvasMouseY).reverse().find((node) => {
           const { width, height } = getNodeDimensions(node);
           return canvasMouseX >= node.x && canvasMouseX <= node.x + width && canvasMouseY >= node.y && canvasMouseY <= node.y + height;
-        })?.id ?? null
-      : null);
+        })?.id ?? null);
     const menuHeight = resolvedNodeId ? 360 : 240;
     const menuX = Math.max(8, Math.min(e.clientX - rect.left, rect.width - menuWidth - 8));
     const menuY = Math.max(8, Math.min(e.clientY - rect.top, rect.height - menuHeight - 8));
@@ -2036,7 +2045,7 @@ export const Editor: React.FC = () => {
             fixed lg:static inset-y-0 left-0 z-40 lg:z-10
             h-full border-r-2 border-ink bg-paper flex flex-col shrink-0 select-none overflow-hidden
             transition-all duration-200 ease-in-out shadow-hard-ink lg:shadow-none
-            ${isSidebarOpen ? 'w-[300px] translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0 border-r-0'}
+            ${isSidebarOpen ? `${leftSidebarTab === 'code' ? 'w-[min(440px,100vw)]' : 'w-[300px]'} translate-x-0` : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0 border-r-0'}
           `}
         >
           {/* Dual Tabs Header */}
@@ -2442,7 +2451,7 @@ export const Editor: React.FC = () => {
                             codeDirection === 'LR' ? 'bg-ink text-paper' : 'text-ink-soft hover:text-ink'
                           }`}
                         >
-                          LR (Horiz)
+                          Horizontal
                         </button>
                         <button
                           type="button"
@@ -2451,7 +2460,17 @@ export const Editor: React.FC = () => {
                             codeDirection === 'TD' ? 'bg-ink text-paper' : 'text-ink-soft hover:text-ink'
                           }`}
                         >
-                          TD (Vert)
+                          Vertical
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCodeDirection('COMPACT')}
+                          className={`flex-1 py-1 text-center font-bold border-l border-ink cursor-pointer ${
+                            codeDirection === 'COMPACT' ? 'bg-ink text-paper' : 'text-ink-soft hover:text-ink'
+                          }`}
+                          title="Wrap long flows into a balanced layout"
+                        >
+                          Compact
                         </button>
                       </div>
                     </div>
@@ -2482,24 +2501,30 @@ export const Editor: React.FC = () => {
                   </div>
 
                   {/* Code Textarea */}
-                  <div className="flex flex-col gap-1 flex-1 min-h-[180px]">
+                  <div className="flex flex-col gap-1 flex-1 min-h-[280px]">
                     <div className="flex justify-between items-center text-[10px] text-ink-soft font-bold">
                       <span>MERMAID / TEXT CODE</span>
-                      <span className="text-[9px] text-blueprint font-mono">Live Preview Enabled</span>
+                      <span className="text-[9px] text-blueprint font-mono">{codeText.split(/\r?\n/).length} lines · Live preview</span>
+                    </div>
+                    <p className="text-[10px] text-ink-soft">Accepts supported Mermaid and Diagrid diagram syntax. JavaScript, Python, and other program source cannot be converted directly.</p>
+                    <div className="flex h-80 shrink-0 border-2 border-ink bg-[#101417] focus-within:border-blueprint overflow-hidden">
+                    <div ref={codeLineNumbersRef} aria-hidden="true" className="w-11 shrink-0 overflow-hidden border-r border-[#334155] bg-[#151b20] px-2 pt-3 pb-3 text-right text-[11px] leading-5 text-[#64748b] select-none">
+                      {codeText.split(/\r?\n/).map((_, index) => <div key={index}>{index + 1}</div>)}
                     </div>
                     <textarea
                       ref={codeTextareaRef}
                       value={codeText}
                       onChange={(e) => setCodeText(e.target.value)}
+                      onScroll={(e) => { if (codeLineNumbersRef.current) codeLineNumbersRef.current.scrollTop = e.currentTarget.scrollTop; }}
                       onPaste={(e) => {
                         const pasted = e.clipboardData.getData('text');
                         if (/^(flowchart|graph|erDiagram|sequenceDiagram|dfdDiagram|usecaseDiagram|activityDiagram)\b/i.test(pasted.trim())) {
-                          const isVertical = /\b(TD|TB)\b/i.test(pasted) || /^activityDiagram\b/i.test(pasted.trim());
+                          const isVertical = /^(?:flowchart|graph)\s+(?:TD|TB)\b/i.test(pasted.trim()) || /^activityDiagram\b/i.test(pasted.trim());
                           setCodeDirection(isVertical ? 'TD' : 'LR');
                           setCodeStatus({ type: 'success', message: 'Diagram syntax detected and direction set.' });
                         }
                       }}
-                      className="w-full flex-1 min-h-[180px] bg-[#101417] text-[#E2E8F0] text-[11px] p-2.5 border-2 border-ink resize-none focus:outline-none focus:border-blueprint leading-relaxed select-text font-mono"
+                      className="min-w-0 h-full flex-1 bg-[#101417] text-[#E2E8F0] text-[12px] p-3 border-0 resize-none focus:outline-none leading-5 select-text font-mono whitespace-pre overflow-auto"
                       placeholder={
                         diagram?.type === 'erd'
                           ? `Table: Users\n- id uuid pk\n- email text\n\nTable: Orders\n- id uuid pk\n- user_id uuid fk\n\nUsers --> Orders: places`
@@ -2513,6 +2538,7 @@ export const Editor: React.FC = () => {
                       }
                       spellCheck={false}
                     />
+                    </div>
                   </div>
 
                   {/* Status Message */}
@@ -2921,7 +2947,7 @@ export const Editor: React.FC = () => {
                 const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
                 
                 const colorVal = node.width || 1;
-                const applyShadow = !isDiamond && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
+                const applyShadow = !isDiamond && node.type !== 'subgraph' && node.type !== 'usecase-boundary' && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
                 
                 let customBoxShadow = '';
                 if (applyShadow) {
@@ -2934,7 +2960,7 @@ export const Editor: React.FC = () => {
                   }
                 }
 
-                const nodeBorderStyle = node.borderStyle || (node.type === 'text' ? 'none' : node.type === 'usecase-boundary' ? 'dashed' : 'solid');
+                const nodeBorderStyle = node.borderStyle || (node.type === 'text' ? 'none' : node.type === 'usecase-boundary' || node.type === 'subgraph' ? 'dashed' : 'solid');
                 const nodeBorderWidth = nodeBorderStyle === 'none' ? '0px' : (node.borderWidth ? `${node.borderWidth}px` : (node.type === 'activity-end' ? '2.5px' : '1.5px'));
                 const effectiveFontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
                 const textStyleObj: React.CSSProperties = { fontSize: `${effectiveFontSize}px` };
@@ -2944,6 +2970,8 @@ export const Editor: React.FC = () => {
                 let shapeClasses = "bg-paper-raised border-ink flex flex-col justify-between p-4";
                 if (isDiamond) {
                   shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 shadow-none";
+                } else if (node.type === 'subgraph') {
+                  shapeClasses = "bg-transparent border-slate-400 flex flex-col p-0";
                 } else if (node.type === 'text') {
                   shapeClasses = "bg-transparent flex items-center justify-center p-2";
                 } else if (node.type === 'table') {
@@ -2989,14 +3017,16 @@ export const Editor: React.FC = () => {
                       width: `${width}px`,
                       height: `${height}px`,
                       backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
+                      color: node.textColor,
                       boxShadow: customBoxShadow || undefined,
                       borderStyle: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? (nodeBorderStyle === 'none' ? 'none' : nodeBorderStyle) : undefined,
                       borderWidth: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? nodeBorderWidth : undefined,
+                      borderColor: node.borderColor || (node.type === 'subgraph' ? '#64748b' : undefined),
                       borderRightWidth: node.type === 'dfd-store' ? '0px' : undefined,
                       borderRightStyle: node.type === 'dfd-store' ? 'none' : undefined,
                       borderRightColor: node.type === 'dfd-store' ? 'transparent' : undefined,
                     }}
-                    className={`absolute pointer-events-auto select-none ${
+                    className={`absolute ${node.type === 'subgraph' ? 'pointer-events-none' : 'pointer-events-auto'} select-none ${
                       draggedNodeId === node.id ? 'cursor-grabbing z-20 shadow-xl' : isSelected ? 'cursor-grab' : 'cursor-default'
                     } ${shapeClasses} ${
                       isSelected && !isDiamond
@@ -3087,7 +3117,7 @@ export const Editor: React.FC = () => {
                           <polygon
                             points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`}
                             fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : dc.paperRaised}
-                            stroke={isSelected ? dc.blueprint : dc.ink}
+                            stroke={isSelected ? dc.blueprint : node.borderColor || dc.ink}
                             strokeWidth={node.borderWidth || (isSelected ? 2 : 1.5)}
                             strokeDasharray={node.borderStyle === 'dashed' ? '5 5' : node.borderStyle === 'dotted' ? '2 2' : undefined}
                           />
@@ -3112,12 +3142,14 @@ export const Editor: React.FC = () => {
 
                         {/* Centered Upright Label */}
                         <div 
-                          className={`relative z-10 font-mono ${textClass} px-2.5 leading-tight text-ink max-w-[80px] break-words select-none pointer-events-none`}
-                          style={textStyleObj}
+                          className={`relative z-10 font-mono ${textClass} px-2.5 leading-tight text-ink break-words select-none pointer-events-none`}
+                          style={{ ...textStyleObj, color: node.textColor, maxWidth: Math.max(80, width * 0.65) }}
                         >
                           {node.label}
                         </div>
                       </div>
+                    ) : node.type === 'subgraph' ? (
+                      <div className="font-mono font-bold absolute top-3 left-4" style={textStyleObj}>{node.label}</div>
                     ) : node.type === 'text' ? (
                       <div 
                         className={`font-mono select-none w-full h-full flex items-center leading-normal px-2 ${flexAlignClass} ${node.isBold === false ? 'font-normal' : 'font-bold'}`}

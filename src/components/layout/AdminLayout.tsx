@@ -41,6 +41,7 @@ export const AdminLayout: React.FC = () => {
 
   const adminMenuItems = [
     { label: 'overview', path: '/admin', icon: BarChart2 },
+    { label: 'analytics', path: '/admin/analytics', icon: BarChart2 },
     { label: 'users', path: '/admin/users', icon: Users },
     { label: 'storage', path: '/admin/storage', icon: Database },
     { label: 'feedback', path: '/admin/feedback', icon: MessageSquare },
@@ -162,7 +163,7 @@ export const AdminLayout: React.FC = () => {
         </aside>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto bg-paper flex flex-col">
+        <main className="flex-1 min-w-0 overflow-y-auto bg-paper flex flex-col">
           <Outlet />
         </main>
       </div>

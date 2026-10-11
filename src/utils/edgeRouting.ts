@@ -82,7 +82,7 @@ export const isSegmentBlocked = (
   targetId: string
 ): boolean => {
   for (const node of allNodes) {
-    if (node.id === sourceId || node.id === targetId) continue;
+    if (node.type === 'subgraph' || node.id === sourceId || node.id === targetId) continue;
     if (isSegmentIntersectingNode(p1, p2, node)) {
       return true;
     }
@@ -254,6 +254,28 @@ export const getOrthogonalRoutePath = (
     return buildSvgPath(simplifyOrthogonalPath(candidates[0]));
   }
 
+  // Large diagrams use bounded routing. Try a straight corridor beside each
+  // nearby card before accepting a line that crosses a shape.
+  const laneXs = new Set<number>([midX]);
+  const laneYs = new Set<number>([midY]);
+  for (const node of allNodes) {
+    if (node.type === 'subgraph') continue;
+    const { width, height } = getNodeDimensions(node);
+    laneXs.add(node.x - 24);
+    laneXs.add(node.x + width + 24);
+    laneYs.add(node.y - 24);
+    laneYs.add(node.y + height + 24);
+  }
+  const laneCandidates = [
+    ...[...laneXs].map(x => [start, startBuf, { x, y: startBuf.y }, { x, y: endBuf.y }, endBuf, end]),
+    ...[...laneYs].map(y => [start, startBuf, { x: startBuf.x, y }, { x: endBuf.x, y }, endBuf, end]),
+  ];
+  const routeLength = (points: { x: number; y: number }[]) => points.slice(1).reduce((total, point, index) => total + Math.abs(point.x - points[index].x) + Math.abs(point.y - points[index].y), 0);
+  laneCandidates.sort((a, b) => routeLength(a) - routeLength(b));
+  for (const path of laneCandidates) {
+    if (routeIsClear(path)) return buildSvgPath(simplifyOrthogonalPath(path));
+  }
+
   // The Hanan-grid search is useful for a handful of difficult routes but it
   // grows rapidly with the number of obstacles. Interactive editors use a
   // bounded fast route while dragging (and for dense scenes) to protect the
@@ -267,6 +289,7 @@ export const getOrthogonalRoutePath = (
   const ysSet = new Set<number>([start.y, startBuf.y, end.y, endBuf.y]);
 
   allNodes.forEach(node => {
+    if (node.type === 'subgraph') return;
     const { width, height } = getNodeDimensions(node);
     const padding = 20;
     xsSet.add(node.x - padding);
@@ -326,6 +349,7 @@ export const getOrthogonalRoutePath = (
     for (const nbr of neighbors) {
       let insideObstacle = false;
       for (const node of allNodes) {
+        if (node.type === 'subgraph') continue;
         if (isPointInsideNode(nbr.pt.x, nbr.pt.y, node)) {
           insideObstacle = true;
           break;

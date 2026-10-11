@@ -1,5 +1,7 @@
+import { useMemo, useState } from 'react';
 import type { CodeToDiagramResult } from '../../utils/codeToDiagram';
 import { getNodeDimensions } from '../../types/canvas';
+import { calculateEdgePath, getEdgeLabelPosition } from '../../utils/edgeRouting';
 
 interface Props {
   result: CodeToDiagramResult;
@@ -12,13 +14,29 @@ interface Props {
 }
 
 export function CodeImportPreview({ result, mode, existingNodes, existingEdges, onApply, onCancel, onDiagnosticSelect }: Props) {
+  const [focusedGroup, setFocusedGroup] = useState('overview');
+  const [zoom, setZoom] = useState(1);
   const hasErrors = result.nodes.length === 0 || result.diagnostics.some(item => item.severity === 'error');
+  const groups = result.nodes.filter(node => node.type === 'subgraph');
+  const shapes = result.nodes.filter(node => node.type !== 'subgraph');
   const bounds = result.nodes.map(node => ({ node, ...getNodeDimensions(node) }));
-  const left = bounds.length ? Math.min(...bounds.map(({ node }) => node.x)) - 30 : 0;
-  const top = bounds.length ? Math.min(...bounds.map(({ node }) => node.y)) - 30 : 0;
-  const right = bounds.length ? Math.max(...bounds.map(({ node, width }) => node.x + width)) + 30 : 1;
-  const bottom = bounds.length ? Math.max(...bounds.map(({ node, height }) => node.y + height)) + 30 : 1;
-  const centers = new Map(bounds.map(({ node, width, height }) => [node.id, { x: node.x + width / 2, y: node.y + height / 2 }]));
+  const focus = groups.find(node => node.id === focusedGroup);
+  const focusBounds = focus ? bounds.filter(({ node }) => node.id === focus.id) : bounds;
+  const left = focusBounds.length ? Math.min(...focusBounds.map(({ node }) => node.x)) - 40 : 0;
+  const top = focusBounds.length ? Math.min(...focusBounds.map(({ node }) => node.y)) - 40 : 0;
+  const right = focusBounds.length ? Math.max(...focusBounds.map(({ node, width }) => node.x + width)) + 40 : 1;
+  const bottom = focusBounds.length ? Math.max(...focusBounds.map(({ node, height }) => node.y + height)) + 40 : 1;
+  const viewWidth = Math.max(1, (right - left) / zoom);
+  const viewHeight = Math.max(1, (bottom - top) / zoom);
+  const viewX = left + (right - left - viewWidth) / 2;
+  const viewY = top + (bottom - top - viewHeight) / 2;
+  const previewEdges = useMemo(() => {
+    const nodesById = new Map(result.nodes.map(node => [node.id, node]));
+    return result.edges.map(edge => {
+      const path = calculateEdgePath(edge, result.nodes, nodesById, { skipSearch: result.nodes.length > 30 });
+      return { edge, path, labelPosition: getEdgeLabelPosition(path) };
+    }).filter(item => item.path);
+  }, [result]);
 
   return (
     <div className="border-2 border-blueprint bg-paper p-2.5 space-y-2 text-[11px]">
@@ -27,24 +45,45 @@ export function CodeImportPreview({ result, mode, existingNodes, existingEdges, 
         <div className="text-[9px] uppercase tracking-wider font-bold text-blueprint">{result.syntax}</div>
       </div>
       <div className="text-ink-soft">
-        {result.nodes.length} shapes, {result.edges.length} connections
+        {shapes.length} shapes, {result.edges.length} connections, {groups.length} sections
         {mode === 'replace' ? ` will replace ${existingNodes} shapes and ${existingEdges} connections.` : ' will be added to the canvas.'}
       </div>
-      {bounds.length > 0 ? <svg className="w-full h-36 border border-line bg-paper-raised" viewBox={`${left} ${top} ${Math.max(1, right - left)} ${Math.max(1, bottom - top)}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Preview of generated diagram">
-        {result.edges.map(edge => {
-          const source = centers.get(edge.source);
-          const target = centers.get(edge.target);
-          return source && target ? <line key={edge.id} x1={source.x} y1={source.y} x2={target.x} y2={target.y} stroke="#64748b" strokeWidth="2" /> : null;
-        })}
-        {bounds.map(({ node, width, height }) => (
+      {bounds.length > 0 && <div className="flex items-center gap-1.5">
+        <select aria-label="Preview section" value={focusedGroup} onChange={event => { setFocusedGroup(event.target.value); setZoom(1); }} className="min-w-0 flex-1 border border-line bg-paper-raised px-1.5 py-1 text-ink font-mono">
+          <option value="overview">Entire diagram</option>
+          {groups.map(group => <option key={group.id} value={group.id}>{group.label}</option>)}
+        </select>
+        <button type="button" aria-label="Zoom out preview" onClick={() => setZoom(value => Math.max(0.5, value / 1.5))} className="border border-line px-2 py-1 font-bold text-ink">−</button>
+        <button type="button" aria-label="Zoom in preview" onClick={() => setZoom(value => Math.min(8, value * 1.5))} className="border border-line px-2 py-1 font-bold text-ink">+</button>
+      </div>}
+      {bounds.length > 0 ? <svg className="w-full h-72 border border-line bg-[#101417]" viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Preview of generated diagram">
+        <defs><marker id="import-preview-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#94a3b8" /></marker></defs>
+        {bounds.filter(({ node }) => node.type === 'subgraph').map(({ node, width, height }) => (
           <g key={node.id}>
-            <rect x={node.x} y={node.y} width={width} height={height} rx="5" fill="#fff" stroke="#334155" strokeWidth="2" />
-            <text x={node.x + width / 2} y={node.y + height / 2} textAnchor="middle" dominantBaseline="middle" fontSize="13" fill="#1e293b">
-              {node.label.length > 24 ? `${node.label.slice(0, 21)}…` : node.label}
+            <rect x={node.x} y={node.y} width={width} height={height} fill="#fff" fillOpacity="0.12" stroke="#64748b" strokeWidth="2" />
+            <text x={node.x + width / 2} y={node.y + 26} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#e2e8f0">{node.label}</text>
+          </g>
+        ))}
+        {previewEdges.map(({ edge, path, labelPosition }) => {
+          const labelX = labelPosition.x;
+          const labelY = labelPosition.y;
+          return <g key={edge.id}>
+            <path d={path} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray={edge.style === 'dashed' ? '6 4' : undefined} markerEnd={edge.arrow === 'none' ? undefined : 'url(#import-preview-arrow)'} />
+            {edge.label && <g><rect x={labelX - Math.max(17, edge.label.length * 3.5 + 6)} y={labelY - 11} width={Math.max(34, edge.label.length * 7 + 12)} height="22" rx="10" fill="#12273a" stroke="#2563eb" /><text x={labelX} y={labelY + 4} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#dbeafe">{edge.label}</text></g>}
+          </g>;
+        })}
+        {bounds.filter(({ node }) => node.type !== 'subgraph').map(({ node, width, height }) => (
+          <g key={node.id}>
+            {node.type === 'decision' || node.type === 'activity-decision'
+              ? <polygon points={`${node.x + width / 2},${node.y} ${node.x + width},${node.y + height / 2} ${node.x + width / 2},${node.y + height} ${node.x},${node.y + height / 2}`} fill={node.fillColor || '#153b5c'} stroke={node.borderColor || '#2563eb'} strokeWidth={node.borderWidth || 2} />
+              : <rect x={node.x} y={node.y} width={width} height={height} rx={node.type === 'terminal' ? height / 2 : 8} fill={node.fillColor || '#153b5c'} stroke={node.borderColor || '#2563eb'} strokeWidth={node.borderWidth || 2} />}
+            <text x={node.x + width / 2} y={node.y + height / 2} textAnchor="middle" dominantBaseline="middle" fontSize="12" fontWeight="bold" fill={node.textColor || '#e2e8f0'}>
+              {node.label}
             </text>
           </g>
         ))}
       </svg> : <div className="h-20 border border-line bg-paper-raised flex items-center justify-center text-ink-soft">No shapes available to preview</div>}
+      {groups.length > 0 && <p className="text-[10px] text-ink-soft">Choose a section to inspect a large diagram. Zoom changes the preview only.</p>}
       {result.diagnostics.length > 0 && (
         <div className="border border-signal bg-signal/10 p-2 text-signal">
           <div className="font-bold">{result.diagnostics.length} source issue{result.diagnostics.length === 1 ? '' : 's'}</div>

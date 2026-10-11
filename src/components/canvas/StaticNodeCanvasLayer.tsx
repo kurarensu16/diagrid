@@ -44,17 +44,26 @@ const drawNode = (ctx: CanvasRenderingContext2D, node: CanvasNode) => {
   const { width, height } = getNodeDimensions(node);
   const x = node.x;
   const y = node.y;
-  const fill = node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : '#FFFFFF';
+  const fill = node.fillColor || '#FFFFFF';
   const fontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
   const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
 
   ctx.save();
   ctx.lineWidth = node.borderWidth || 1.5;
-  ctx.strokeStyle = '#15191C';
+  ctx.strokeStyle = node.borderColor || (node.type === 'subgraph' ? '#64748b' : '#15191C');
   ctx.fillStyle = fill;
   ctx.setLineDash(node.borderStyle === 'dashed' ? [5, 5] : node.borderStyle === 'dotted' ? [2, 2] : []);
 
-  if (isDiamond) {
+  if (node.type === 'subgraph') {
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x, y, width, height);
+    ctx.setLineDash([]);
+    ctx.fillStyle = node.textColor || '#15191C';
+    ctx.font = `bold ${fontSize}px ui-monospace, monospace`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(node.label, x + 16, y + 26, Math.max(width - 32, 10));
+  } else if (isDiamond) {
     ctx.beginPath();
     ctx.moveTo(x + width / 2, y);
     ctx.lineTo(x + width, y + height / 2);
@@ -93,8 +102,8 @@ const drawNode = (ctx: CanvasRenderingContext2D, node: CanvasNode) => {
   ctx.setLineDash([]);
   if (node.type === 'table') {
     drawTable(ctx, node, x, y, width, height, fontSize);
-  } else if (node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork') {
-    drawLabel(ctx, node.label, x, y, width, height, fontSize, node.textAlign);
+  } else if (node.type !== 'subgraph' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork') {
+    drawLabel(ctx, node.label, x, y, width, height, fontSize, node.textAlign, node.textColor);
   }
   ctx.restore();
 };
@@ -103,7 +112,7 @@ const drawTable = (ctx: CanvasRenderingContext2D, node: CanvasNode, x: number, y
   const headerHeight = 30;
   ctx.fillStyle = node.shadowAccent && node.shadowAccent !== 'none' && node.shadowAccent.startsWith('#') ? node.shadowAccent : '#1E5C8C';
   ctx.fillRect(x, y, width, headerHeight);
-  ctx.strokeStyle = '#15191C';
+  ctx.strokeStyle = node.borderColor || '#15191C';
   ctx.lineWidth = 1.5;
   ctx.strokeRect(x, y, width, height);
   ctx.beginPath();
@@ -136,8 +145,8 @@ const drawTable = (ctx: CanvasRenderingContext2D, node: CanvasNode, x: number, y
   });
 };
 
-const drawLabel = (ctx: CanvasRenderingContext2D, label: string, x: number, y: number, width: number, height: number, fontSize: number, align?: CanvasNode['textAlign']) => {
-  ctx.fillStyle = '#15191C';
+const drawLabel = (ctx: CanvasRenderingContext2D, label: string, x: number, y: number, width: number, height: number, fontSize: number, align?: CanvasNode['textAlign'], textColor?: string) => {
+  ctx.fillStyle = textColor || '#15191C';
   ctx.font = `${fontSize}px ui-monospace, monospace`;
   ctx.textBaseline = 'middle';
   ctx.textAlign = align === 'left' ? 'left' : align === 'right' ? 'right' : 'center';

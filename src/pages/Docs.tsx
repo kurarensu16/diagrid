@@ -60,7 +60,8 @@ const sections: Section[] = [
     id: 'code', title: 'Code and Mermaid', category: 'Work with diagrams',
     description: 'Generate a canvas from code or copy code from a canvas.',
     blocks: [
-      { heading: 'Code to canvas', text: 'In the editor, open Code to Diagram, then Code → Canvas. Enter supported code or start with a preset. Choose the direction and whether to replace the canvas or append to it before generating.' },
+      { heading: 'Code to canvas', text: 'In the editor, open Code to Diagram, then Code → Canvas. Enter supported Mermaid or Diagrid diagram syntax, or start with a preset. Programming language source files are not supported. Choose the direction and whether to replace or append before generating; resolve source errors shown in the preview before applying.' },
+      { heading: 'Flowchart colors', text: 'The importer supports hexadecimal fill, stroke, and text colors through Mermaid style, classDef, class, and inline :::class syntax. Subgraphs and styling properties outside this set produce source errors until the canvas can represent them.' },
       { heading: 'Canvas to code', text: 'Open Canvas → Code for a live Mermaid representation. Choose flowchart or ER output, select a direction for flowcharts, then copy or download the code.' },
       { heading: 'Export option', text: 'You can also download Mermaid from the Export dialog. Check the generated code after editing complex diagrams because visual details may not have an equivalent Mermaid form.' },
     ],

@@ -223,6 +223,7 @@ export const getMarkerUrl = (
 
 // Default dimensions per shape type
 export const getDefaultDimensions = (node: CanvasNode): { width: number; height: number } => {
+  if (node.type === 'subgraph') return { width: 360, height: 300 };
   if (node.type === 'table') {
     const fieldCount = node.fields?.length || 0;
     return { width: 180, height: Math.max(48, 32 + fieldCount * 24) };

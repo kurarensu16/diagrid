@@ -731,7 +731,7 @@ export const PublicViewer: React.FC = () => {
                 const isDiamond = node.type === 'decision' || node.type === 'activity-decision';
 
                 const colorVal = node.width || 1;
-                const applyShadow = !isDiamond && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
+                const applyShadow = !isDiamond && node.type !== 'subgraph' && node.type !== 'usecase-boundary' && node.type !== 'dfd-store' && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork';
 
                 let customBoxShadow = '';
                 if (applyShadow) {
@@ -744,7 +744,7 @@ export const PublicViewer: React.FC = () => {
                   }
                 }
 
-                const nodeBorderStyle = node.borderStyle || (node.type === 'text' ? 'none' : node.type === 'usecase-boundary' ? 'dashed' : 'solid');
+                const nodeBorderStyle = node.borderStyle || (node.type === 'text' ? 'none' : node.type === 'usecase-boundary' || node.type === 'subgraph' ? 'dashed' : 'solid');
                 const nodeBorderWidth = nodeBorderStyle === 'none' ? '0px' : (node.borderWidth ? `${node.borderWidth}px` : (node.type === 'activity-end' ? '2.5px' : '1.5px'));
                 const effectiveFontSize = node.customFontSize || (node.fontSize === 'sm' ? 11 : node.fontSize === 'lg' ? 16 : 13);
                 const textStyleObj: React.CSSProperties = { fontSize: `${effectiveFontSize}px` };
@@ -756,6 +756,8 @@ export const PublicViewer: React.FC = () => {
 
                 if (isDiamond) {
                   shapeClasses = "bg-transparent border-0 flex items-center justify-center p-0 shadow-none";
+                } else if (node.type === 'subgraph') {
+                  shapeClasses = "bg-transparent border-slate-400 flex flex-col p-0";
                 } else if (node.type === 'text') {
                   shapeClasses = "bg-transparent flex items-center justify-center p-2";
                 } else if (node.type === 'table') {
@@ -813,14 +815,16 @@ export const PublicViewer: React.FC = () => {
                       width: `${width}px`,
                       height: `${height}px`,
                       backgroundColor: node.fillColor && !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-end' && node.type !== 'activity-fork' ? (node.fillColor === 'transparent' ? 'transparent' : node.fillColor) : undefined,
+                      color: node.textColor,
                       boxShadow: customBoxShadow || undefined,
                       borderStyle: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? (nodeBorderStyle === 'none' ? 'none' : nodeBorderStyle) : undefined,
                       borderWidth: !isDiamond && node.type !== 'usecase-actor' && node.type !== 'activity-start' && node.type !== 'activity-fork' ? nodeBorderWidth : undefined,
+                      borderColor: node.borderColor || (node.type === 'subgraph' ? '#64748b' : undefined),
                       borderRightWidth: node.type === 'dfd-store' ? '0px' : undefined,
                       borderRightStyle: node.type === 'dfd-store' ? 'none' : undefined,
                       borderRightColor: node.type === 'dfd-store' ? 'transparent' : undefined,
                     }}
-                    className={`absolute pointer-events-auto select-none cursor-pointer transition-shadow hover:brightness-105 ${shapeClasses} ${
+                    className={`absolute ${node.type === 'subgraph' ? 'pointer-events-none' : 'pointer-events-auto'} select-none cursor-pointer transition-shadow hover:brightness-105 ${shapeClasses} ${
                       isSelected && !isDiamond
                         ? nodeBorderStyle === 'none'
                           ? '!border !border-dashed !border-blueprint'
@@ -848,18 +852,20 @@ export const PublicViewer: React.FC = () => {
                           <polygon
                             points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`}
                             fill={node.fillColor && node.fillColor !== 'transparent' ? node.fillColor : (isDark ? '#1C2226' : '#FFFFFF')}
-                            stroke={isSelected ? '#1E5C8C' : isDark ? '#E1E5E3' : '#15191C'}
+                            stroke={isSelected ? '#1E5C8C' : node.borderColor || (isDark ? '#E1E5E3' : '#15191C')}
                             strokeWidth={node.borderWidth || (isSelected ? 2 : 1.5)}
                             strokeDasharray={node.borderStyle === 'dashed' ? '5 5' : node.borderStyle === 'dotted' ? '2 2' : undefined}
                           />
                         </svg>
                         <div
-                          className={`relative z-10 font-mono ${textClass} px-2.5 leading-tight ${isDark ? 'text-white' : 'text-ink'} max-w-[80px] break-words select-none pointer-events-none`}
-                          style={textStyleObj}
+                          className={`relative z-10 font-mono ${textClass} px-2.5 leading-tight ${isDark ? 'text-white' : 'text-ink'} break-words select-none pointer-events-none`}
+                          style={{ ...textStyleObj, color: node.textColor, maxWidth: Math.max(80, width * 0.65) }}
                         >
                           {node.label}
                         </div>
                       </div>
+                    ) : node.type === 'subgraph' ? (
+                      <div className="font-mono font-bold absolute top-3 left-4" style={textStyleObj}>{node.label}</div>
                     ) : node.type === 'text' ? (
                       <div
                         className={`font-mono select-none w-full h-full flex items-center justify-center leading-normal px-2 ${textClass}`}

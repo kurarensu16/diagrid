@@ -8,7 +8,7 @@ export interface Project {
 
 export interface CanvasNode {
   id: string;
-  type: 'table' | 'process' | 'decision' | 'terminal' | 'text' | 'dfd-store' | 'dfd-entity' | 'dfd-process' | 'usecase-actor' | 'usecase-oval' | 'usecase-boundary' | 'sequence-activation' | 'activity-start' | 'activity-end' | 'activity-action' | 'activity-decision' | 'activity-fork';
+  type: 'table' | 'process' | 'decision' | 'terminal' | 'text' | 'subgraph' | 'dfd-store' | 'dfd-entity' | 'dfd-process' | 'usecase-actor' | 'usecase-oval' | 'usecase-boundary' | 'sequence-activation' | 'activity-start' | 'activity-end' | 'activity-action' | 'activity-decision' | 'activity-fork';
   label: string;
   x: number;
   y: number;
@@ -24,6 +24,9 @@ export interface CanvasNode {
   borderStyle?: 'none' | 'solid' | 'dashed' | 'dotted';
   borderWidth?: 1 | 2 | 3;
   fillColor?: string; // hex code or transparent
+  borderColor?: string; // custom outline color
+  textColor?: string; // custom label color
+  subgraphId?: string; // Mermaid group identifier, when imported
   shadowAccent?: string; // custom hex color, palette color, or 'none'
 }
 

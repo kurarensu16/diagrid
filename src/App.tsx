@@ -132,6 +132,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 import { BroadcastBanner } from './components/ui/BroadcastBanner';
 import { AdminLayout } from './components/layout/AdminLayout';
 import { AdminOverview } from './pages/admin/AdminOverview';
+import { AdminAnalytics } from './pages/admin/AdminAnalytics';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminStorage } from './pages/admin/AdminStorage';
 import { AdminFeedbackPage } from './pages/admin/AdminFeedback';
@@ -382,6 +383,7 @@ function App() {
             }
           >
             <Route path="/admin" element={<AdminOverview />} />
+            <Route path="/admin/analytics" element={<AdminAnalytics />} />
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/storage" element={<AdminStorage />} />
             <Route path="/admin/content" element={<Navigate to="/admin/storage" replace />} />

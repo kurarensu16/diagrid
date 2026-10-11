@@ -35,6 +35,10 @@
 
 ## Tech Stack
 
+The FRE413 analytics page is available at `/admin/analytics`. A Flutter web
+companion lives in `flutter_analytics/`. Both use the same Supabase calculations.
+See [Analytics setup and rubric mapping](ANALYTICS.md).
+
 - **Frontend**: React 19, TypeScript, Vite 8, Tailwind CSS v3
 - **Icons**: Lucide React
 - **Routing**: React Router v7

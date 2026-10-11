@@ -1,0 +1,109 @@
+flowchart TD
+    Start([Start]) --> Visit[Customer Visits Platform]
+    Visit --> Auth{Authenticated?}
+
+    subgraph AUTH["1. Authentication"]
+        Auth -->|No| Login[Login or Register]
+        Login --> Validate{Valid Credentials?}
+        Validate -->|No| ErrorLogin[Display Error]
+        ErrorLogin --> Login
+        Validate -->|Yes| Browse
+        Auth -->|Yes| Browse[Browse Products]
+    end
+
+    subgraph CART["2. Shopping Cart"]
+        Browse --> Select[Select Product]
+        Select --> Stock{In Stock?}
+        Stock -->|No| Notify[Show Out of Stock]
+        Notify --> Browse
+        Stock -->|Yes| AddCart[Add to Cart]
+        AddCart --> Continue{Continue Shopping?}
+        Continue -->|Yes| Browse
+        Continue -->|No| Review[Review Shopping Cart]
+        Review --> Checkout{Proceed to Checkout?}
+        Checkout -->|No| Browse
+    end
+
+    subgraph ORDER["3. Order Validation"]
+        Checkout -->|Yes| Address[Enter Shipping Address]
+        Address --> ValidateAddress{Address Valid?}
+        ValidateAddress -->|No| Address
+        ValidateAddress -->|Yes| Shipping[Calculate Shipping Fee]
+        Shipping --> Promo{Apply Coupon?}
+        Promo -->|Yes| CheckPromo{Coupon Valid?}
+        CheckPromo -->|No| PromoError[Display Coupon Error]
+        PromoError --> Promo
+        CheckPromo -->|Yes| Discount[Apply Discount]
+        Promo -->|No| Total
+        Discount --> Total[Calculate Final Total]
+        Total --> VerifyStock{Stock Still Available?}
+        VerifyStock -->|No| StockError[Update Cart and Notify]
+        StockError --> Review
+        VerifyStock -->|Yes| Reserve[Reserve Inventory]
+    end
+
+    subgraph PAYMENT["4. Payment Processing"]
+        Reserve --> Method{Payment Method?}
+        Method -->|Card| Gateway[Payment Gateway]
+        Method -->|E-Wallet| Wallet[Digital Wallet]
+        Method -->|COD| COD[Cash on Delivery]
+        Gateway --> PayResult{Payment Successful?}
+        Wallet --> PayResult
+        PayResult -->|No| Retry{Retry Payment?}
+        Retry -->|Yes| Method
+        Retry -->|No| Cancel[Cancel Order]
+        COD --> ConfirmPayment[Mark Payment as Pending]
+        PayResult -->|Yes| Paid[Record Successful Payment]
+        ConfirmPayment --> CreateOrder
+        Paid --> CreateOrder[Create Order Record]
+    end
+
+    subgraph FULFILL["5. Order Fulfillment"]
+        CreateOrder --> Warehouse[Send Order to Warehouse]
+        Warehouse --> Pick[Pick and Pack Items]
+        Pick --> Quality{Quality Check Passed?}
+        Quality -->|No| Repack[Replace or Repack Item]
+        Repack --> Quality
+        Quality -->|Yes| Courier[Assign Delivery Courier]
+        Courier --> Dispatch[Dispatch Package]
+        Dispatch --> Tracking[Generate Tracking Information]
+        Tracking --> Delivery{Delivery Successful?}
+        Delivery -->|No| Attempt{Attempts Remaining?}
+        Attempt -->|Yes| Reschedule[Reschedule Delivery]
+        Reschedule --> Delivery
+        Attempt -->|No| ReturnWarehouse[Return to Warehouse]
+        Delivery -->|Yes| Delivered[Mark Order Delivered]
+    end
+
+    subgraph AFTER["6. Post-Delivery"]
+        Delivered --> CODCheck{COD Order?}
+        CODCheck -->|Yes| Collect[Confirm COD Collection]
+        CODCheck -->|No| Complete
+        Collect --> Complete[Mark Order Completed]
+        Complete --> ReturnRequest{Return Requested?}
+        ReturnRequest -->|No| Feedback[Request Customer Feedback]
+        ReturnRequest -->|Yes| ReturnValid{Return Eligible?}
+        ReturnValid -->|No| Reject[Reject Return Request]
+        Reject --> Feedback
+        ReturnValid -->|Yes| ReturnItem[Arrange Item Return]
+        ReturnItem --> Inspect{Inspection Passed?}
+        Inspect -->|No| Reject
+        Inspect -->|Yes| Refund[Process Refund]
+        Refund --> Feedback
+    end
+
+    Cancel --> Release[Release Reserved Inventory]
+    ReturnWarehouse --> Failed[Mark Delivery Failed]
+    Failed --> RefundReview[Review Payment and Refund]
+    RefundReview --> Release
+    Release --> End([End])
+    Feedback --> End
+
+    classDef startEnd fill:#166534,color:#fff,stroke:#14532d,stroke-width:2px
+    classDef decision fill:#fef3c7,color:#78350f,stroke:#d97706,stroke-width:2px
+    classDef error fill:#fee2e2,color:#991b1b,stroke:#dc2626
+    classDef process fill:#dbeafe,color:#1e3a8a,stroke:#2563eb
+
+    class Start,End startEnd
+    class Auth,Validate,Stock,Continue,Checkout,ValidateAddress,Promo,CheckPromo,VerifyStock,Method,PayResult,Retry,Quality,Delivery,Attempt,CODCheck,ReturnRequest,ReturnValid,Inspect decision
+    class ErrorLogin,Notify,PromoError,StockError,Cancel,Failed,Reject error

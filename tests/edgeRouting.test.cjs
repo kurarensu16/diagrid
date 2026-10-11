@@ -65,6 +65,15 @@ test('routes around intervening cards without crossing the source or target', ()
   ], 'right', 'left');
 });
 
+test('subgraph backgrounds do not block connections between their members', () => {
+  const source = card('source', 100, 300);
+  const target = card('target', 800, 300);
+  const group = { ...card('section', 60, 240, 1000, 270), type: 'subgraph' };
+  const path = calculateEdgePath({ source: source.id, target: target.id, sourceHandle: 'right', targetHandle: 'left' }, [group, source, target], undefined, { skipSearch: true });
+  assert.ok(pointsOf(path).some(point => point.x > group.x && point.x < group.x + group.width));
+  assert.equal(path, calculateEdgePath({ source: source.id, target: target.id, sourceHandle: 'right', targetHandle: 'left' }, [source, target], undefined, { skipSearch: true }));
+});
+
 test('DFD connectors keep their ports when shapes are moved past the canvas origin', () => {
   const customer = { ...card('customer', -50, 70, 120, 56), type: 'dfd-entity' };
   const process = { ...card('process', 260, -50, 130, 64), type: 'dfd-process' };

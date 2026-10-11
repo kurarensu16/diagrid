@@ -1,5 +1,6 @@
 import { type CanvasNode, type CanvasEdge, type EdgeMarkerType, type Diagram } from '../services/mockDb';
 import { parseDiagramSource, type DiagramSourceSyntax } from './diagramSourceParser';
+import { calculateEdgePath, getEdgePathPoints, isSegmentBlocked } from './edgeRouting';
 
 export interface CodeToDiagramResult {
   nodes: CanvasNode[];
@@ -20,7 +21,7 @@ export interface CodeDiagnostic {
   suggestion?: string;
 }
 
-export type LayoutDirection = 'LR' | 'TD';
+export type LayoutDirection = 'LR' | 'TD' | 'COMPACT';
 
 export interface ParsedNodeInfo {
   id: string;
@@ -29,7 +30,12 @@ export interface ParsedNodeInfo {
   fields?: string[];
   role?: string;
   subgraph?: string;
+  section?: number;
   colorHint?: string;
+  fillColor?: string;
+  borderColor?: string;
+  textColor?: string;
+  borderWidth?: 1 | 2 | 3;
 }
 
 export const COLOR_HINTS: Record<string, { fill: string; accent?: string }> = {
@@ -234,78 +240,123 @@ export const parseNodeToken = (token: string): ParsedNodeInfo => {
  */
 export const parseCodeToDiagram = (
   rawCode: string,
-  direction: LayoutDirection = 'LR',
+  direction?: LayoutDirection,
   startOffset: { x: number; y: number } = { x: 80, y: 80 }
 ): CodeToDiagramResult => {
-  const parsedSource = parseDiagramSource(rawCode, direction);
+  const parsedSource = parseDiagramSource(rawCode, direction === 'COMPACT' ? 'TD' : direction || 'LR');
   const diagnostics: CodeDiagnostic[] = parsedSource.diagnostics;
 
   if (parsedSource.nodes.length === 0) {
     return { nodes: [], edges: [], diagnostics, syntax: parsedSource.syntax };
   }
 
-  const effectiveDir = parsedSource.direction;
+  const effectiveDir = direction || parsedSource.direction;
   const nodeMap = new Map<string, ParsedNodeInfo>(parsedSource.nodes.map(node => [node.id, node]));
   const edges: ParsedEdgeInfo[] = [...parsedSource.edges];
 
   // --- Automatic Hierarchical DAG Layout Algorithm ---
   const isHorizontal = effectiveDir === 'LR';
   const nodeIds = Array.from(nodeMap.keys());
+  const sectionOf = new Map(nodeIds.map(id => [id, nodeMap.get(id)!.section ?? 0]));
   
-  // Calculate In-Degree and Out-Degree for Topological DAG Leveling
-  const inDegree = new Map<string, number>();
+  // Keep both directions for cycle detection and layer ordering.
   const outEdges = new Map<string, string[]>();
   const inEdges = new Map<string, string[]>();
 
   nodeIds.forEach(id => {
-    inDegree.set(id, 0);
     outEdges.set(id, []);
     inEdges.set(id, []);
   });
 
   edges.forEach(e => {
     if (nodeMap.has(e.source) && nodeMap.has(e.target) && e.source !== e.target) {
-      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
       outEdges.get(e.source)!.push(e.target);
       inEdges.get(e.target)!.push(e.source);
     }
   });
 
-  // Assign Depth Rank (Layer) to each node using Longest Path from Roots
-  const rankMap = new Map<string, number>();
+  const rankOutEdges = new Map(nodeIds.map(id => [id, outEdges.get(id)!.filter(child => sectionOf.get(child) === sectionOf.get(id))]));
+  const rankInEdges = new Map(nodeIds.map(id => [id, inEdges.get(id)!.filter(parent => sectionOf.get(parent) === sectionOf.get(id))]));
+
+  // Collapse strongly connected components before ranking. A large cycle is
+  // arranged in a compact grid rather than one extremely long row/column.
   const visited = new Set<string>();
-
-  // Find root nodes (inDegree === 0)
-  const roots = nodeIds.filter(id => (inDegree.get(id) || 0) === 0);
-  if (roots.length === 0 && nodeIds.length > 0) {
-    roots.push(nodeIds[0]); // Break potential cycles by picking first node
-  }
-
-  const queue: { id: string; rank: number }[] = roots.map(r => ({ id: r, rank: 0 }));
-  roots.forEach(r => rankMap.set(r, 0));
-
-  while (queue.length > 0) {
-    const { id, rank } = queue.shift()!;
-    visited.add(id);
-
-    const children = outEdges.get(id) || [];
-    for (const child of children) {
-      const currentRank = rankMap.get(child) ?? -1;
-      const nextRank = Math.max(currentRank, rank + 1);
-      rankMap.set(child, nextRank);
-      
-      if (!visited.has(child)) {
-        queue.push({ id: child, rank: nextRank });
+  const finishOrder: string[] = [];
+  for (const root of nodeIds) {
+    if (visited.has(root)) continue;
+    const stack: Array<{ id: string; finish: boolean }> = [{ id: root, finish: false }];
+    while (stack.length) {
+      const { id, finish } = stack.pop()!;
+      if (finish) { finishOrder.push(id); continue; }
+      if (visited.has(id)) continue;
+      visited.add(id);
+      stack.push({ id, finish: true });
+      for (const child of [...rankOutEdges.get(id)!].reverse()) {
+        if (!visited.has(child)) stack.push({ id: child, finish: false });
       }
     }
   }
 
-  // Any unreached disconnected nodes get assigned rank 0
-  nodeIds.forEach(id => {
-    if (!rankMap.has(id)) {
-      rankMap.set(id, 0);
+  const componentOf = new Map<string, number>();
+  const components: string[][] = [];
+  for (let index = finishOrder.length - 1; index >= 0; index--) {
+    const root = finishOrder[index];
+    if (componentOf.has(root)) continue;
+    const componentId = components.length;
+    const members: string[] = [];
+    const stack = [root];
+    componentOf.set(root, componentId);
+    while (stack.length) {
+      const id = stack.pop()!;
+      members.push(id);
+      for (const parent of rankInEdges.get(id)!) {
+        if (componentOf.has(parent)) continue;
+        componentOf.set(parent, componentId);
+        stack.push(parent);
+      }
     }
+    components.push(members);
+  }
+
+  const sourceOrder = new Map(nodeIds.map((id, index) => [id, index]));
+  const componentSpan = components.map(members => members.length <= 2 ? 1 : Math.ceil(Math.sqrt(members.length)));
+  const componentOut = components.map(() => new Set<number>());
+  const componentInDegree = components.map(() => 0);
+  for (const edge of edges) {
+    if (sectionOf.get(edge.source) !== sectionOf.get(edge.target)) continue;
+    const source = componentOf.get(edge.source);
+    const target = componentOf.get(edge.target);
+    if (source === undefined || target === undefined || source === target || componentOut[source].has(target)) continue;
+    componentOut[source].add(target);
+    componentInDegree[target]++;
+  }
+  const componentRank = components.map(() => 0);
+  const componentQueue = componentInDegree.map((degree, index) => degree === 0 ? index : -1).filter(index => index >= 0);
+  for (let head = 0; head < componentQueue.length; head++) {
+    const componentId = componentQueue[head];
+    for (const target of componentOut[componentId]) {
+      componentRank[target] = Math.max(componentRank[target], componentRank[componentId] + componentSpan[componentId]);
+      if (--componentInDegree[target] === 0) componentQueue.push(target);
+    }
+  }
+
+  const rankMap = new Map<string, number>();
+  components.forEach((members, componentId) => {
+    members.sort((a, b) => sourceOrder.get(a)! - sourceOrder.get(b)!);
+    const perRank = Math.ceil(members.length / componentSpan[componentId]);
+    members.forEach((id, index) => rankMap.set(id, componentRank[componentId] + Math.floor(index / perRank)));
   });
+
+  if (parsedSource.groups?.length) {
+    let offset = 0;
+    const sections = [...new Set(nodeIds.map(id => sectionOf.get(id)!))].sort((a, b) => a - b);
+    for (const section of sections) {
+      const ids = nodeIds.filter(id => sectionOf.get(id) === section);
+      const maxLocalRank = ids.reduce((max, id) => Math.max(max, rankMap.get(id)!), 0);
+      ids.forEach(id => rankMap.set(id, rankMap.get(id)! + offset));
+      offset += maxLocalRank + 2;
+    }
+  }
 
   // Group nodes by their Layer Rank
   const layers = new Map<number, string[]>();
@@ -324,6 +375,7 @@ export const parseCodeToDiagram = (
   const COL_GAP = isHorizontal ? 140 : 120;
 
   const getParsedNodeDimensions = (parsed: ParsedNodeInfo) => {
+    const flowLabelWidth = parsedSource.syntax === 'flowchart' ? Math.ceil(parsed.label.length * 7.3 + 32) : 0;
     switch (parsed.type) {
       case 'table':
         return {
@@ -332,9 +384,9 @@ export const parseCodeToDiagram = (
         };
       case 'decision':
       case 'activity-decision':
-        return { width: 96, height: 96 };
+        return { width: Math.max(120, Math.min(260, flowLabelWidth || 96)), height: 100 };
       case 'terminal':
-        return { width: 120, height: 38 };
+        return { width: Math.max(120, Math.min(300, flowLabelWidth || 120)), height: 42 };
       case 'dfd-store':
         return { width: 160, height: 48 };
       case 'dfd-entity':
@@ -359,7 +411,7 @@ export const parseCodeToDiagram = (
         return { width: 140, height: 40 };
       case 'process':
       default:
-        return { width: 140, height: 48 };
+        return { width: Math.max(140, Math.min(320, flowLabelWidth || 140)), height: 48 };
     }
   };
 
@@ -369,7 +421,7 @@ export const parseCodeToDiagram = (
     const dimensions = layerNodeIds.map(id => getParsedNodeDimensions(nodeMap.get(id)!));
     layerDimensions.set(rank, {
       // In LR, primary is width and cross is height. In TD these are reversed.
-      primary: Math.max(...dimensions.map(d => isHorizontal ? d.width : d.height)),
+      primary: dimensions.reduce((max, d) => Math.max(max, isHorizontal ? d.width : d.height), 0),
       cross: dimensions.reduce((sum, d) => sum + (isHorizontal ? d.height : d.width), 0) + Math.max(0, dimensions.length - 1) * ROW_GAP
     });
   });
@@ -387,7 +439,7 @@ export const parseCodeToDiagram = (
         return positions.length ? positions.reduce((sum, value) => sum + value, 0) / positions.length : Number.POSITIVE_INFINITY;
       };
       const difference = neighborPosition(a) - neighborPosition(b);
-      return difference || nodeIds.indexOf(a) - nodeIds.indexOf(b);
+      return difference || (sourceOrder.get(a)! - sourceOrder.get(b)!);
     });
     layerNodeIds.forEach((id, index) => nodeOrder.set(id, index));
   });
@@ -401,7 +453,7 @@ export const parseCodeToDiagram = (
     primaryPosition += layerDimensions.get(rank)!.primary + COL_GAP;
   });
 
-  const maxCross = Math.max(...sortedRanks.map(rank => layerDimensions.get(rank)!.cross));
+  const maxCross = sortedRanks.reduce((max, rank) => Math.max(max, layerDimensions.get(rank)!.cross), 0);
 
   const finalNodes: CanvasNode[] = [];
   const idMap = new Map<string, string>(); // maps parsed ID to generated canvas node UUID
@@ -442,7 +494,13 @@ export const parseCodeToDiagram = (
         fields: parsed.fields,
         width: dimensions.width,
         height: dimensions.height,
-        fillColor,
+        customWidth: dimensions.width,
+        customHeight: dimensions.height,
+        fillColor: parsed.fillColor || fillColor,
+        borderColor: parsed.borderColor,
+        textColor: parsed.textColor,
+        borderWidth: parsed.borderWidth,
+        subgraphId: parsed.subgraph,
         shadowAccent
       };
 
@@ -450,6 +508,151 @@ export const parseCodeToDiagram = (
       crossPosition += (isHorizontal ? dimensions.height : dimensions.width) + ROW_GAP;
     });
   });
+
+  // Give disconnected groups separate bands so their nodes and connectors do
+  // not interleave even when they happen to occupy the same DAG ranks.
+  const placedById = new Map(finalNodes.map(node => [node.id, node]));
+  const grouped = new Set<string>();
+  let nextBand = isHorizontal ? startOffset.y : startOffset.x;
+  for (const root of nodeIds) {
+    if (grouped.has(root)) continue;
+    const pending = [root];
+    const members: CanvasNode[] = [];
+    grouped.add(root);
+    while (pending.length) {
+      const id = pending.pop()!;
+      const placed = placedById.get(idMap.get(id)!);
+      if (placed) members.push(placed);
+      for (const neighbor of [...outEdges.get(id)!, ...inEdges.get(id)!]) {
+        if (grouped.has(neighbor)) continue;
+        grouped.add(neighbor);
+        pending.push(neighbor);
+      }
+    }
+    const first = members.reduce((min, node) => Math.min(min, isHorizontal ? node.y : node.x), Infinity);
+    const last = members.reduce((max, node) => Math.max(max, isHorizontal ? node.y + node.height! : node.x + node.width!), -Infinity);
+    const shift = Math.ceil((nextBand - first) / 20) * 20;
+    for (const node of members) {
+      if (isHorizontal) node.y += shift;
+      else node.x += shift;
+    }
+    nextBand = last + shift + 160;
+  }
+
+  if (effectiveDir === 'COMPACT') {
+    // Wrap consecutive ranks into balanced shelves. Keep named subgraphs in
+    // one piece, so the resulting section boxes still describe real members.
+    const compactUnits: string[][] = [];
+    const sections = [...new Set(nodeIds.map(id => sectionOf.get(id)!))].sort((a, b) => a - b);
+    const boundsFor = (ids: string[]) => {
+      const placed = ids.map(id => placedById.get(idMap.get(id)!)!);
+      return {
+        left: Math.min(...placed.map(node => node.x)),
+        top: Math.min(...placed.map(node => node.y)),
+        right: Math.max(...placed.map(node => node.x + node.width!)),
+        bottom: Math.max(...placed.map(node => node.y + node.height!)),
+      };
+    };
+    for (const section of sections) {
+      const ids = nodeIds.filter(id => sectionOf.get(id) === section);
+      if (ids.some(id => nodeMap.get(id)!.subgraph)) {
+        compactUnits.push(ids);
+        continue;
+      }
+      const visited = new Set<string>();
+      for (const root of ids) {
+        if (visited.has(root)) continue;
+        const pending = [root];
+        visited.add(root);
+        const component = new Set<string>();
+        while (pending.length) {
+          const id = pending.pop()!;
+          component.add(id);
+          for (const neighbor of [...outEdges.get(id)!, ...inEdges.get(id)!]) {
+            if (sectionOf.get(neighbor) !== section || visited.has(neighbor)) continue;
+            visited.add(neighbor);
+            pending.push(neighbor);
+          }
+        }
+        const componentIds = ids.filter(id => component.has(id));
+        const ranks = [...new Set(componentIds.map(id => rankMap.get(id)!))].sort((a, b) => a - b);
+        let unit: string[] = [];
+        for (const rank of ranks) {
+          const rankIds = componentIds.filter(id => rankMap.get(id) === rank);
+          if (unit.length) {
+            const candidate = boundsFor([...unit, ...rankIds]);
+            if (candidate.bottom - candidate.top > 1400) {
+              compactUnits.push(unit);
+              unit = [];
+            }
+          }
+          unit.push(...rankIds);
+        }
+        if (unit.length) compactUnits.push(unit);
+      }
+    }
+    const unitBounds = compactUnits.map(ids => boundsFor(ids));
+    const totalArea = unitBounds.reduce((sum, box) => sum + (box.right - box.left) * (box.bottom - box.top), 0);
+    const maxUnitWidth = Math.max(...unitBounds.map(box => box.right - box.left));
+    const targetWidth = Math.max(maxUnitWidth, Math.sqrt(totalArea) * 1.6);
+    const shelves: number[][] = [[]];
+    let shelfWidth = 0;
+    unitBounds.forEach((box, index) => {
+      const width = box.right - box.left;
+      const nextWidth = shelfWidth ? shelfWidth + 180 + width : width;
+      if (shelfWidth && nextWidth > targetWidth) {
+        shelves.push([]);
+        shelfWidth = 0;
+      }
+      shelves[shelves.length - 1].push(index);
+      shelfWidth += (shelfWidth ? 180 : 0) + width;
+    });
+    let cursorY = startOffset.y;
+    shelves.forEach((shelf, rowIndex) => {
+      const reverse = rowIndex % 2 === 1;
+      let cursorX = reverse ? startOffset.x + targetWidth : startOffset.x;
+      const rowHeight = Math.max(...shelf.map(index => unitBounds[index].bottom - unitBounds[index].top));
+      shelf.forEach(index => {
+        const box = unitBounds[index];
+        const width = box.right - box.left;
+        const left = reverse ? cursorX - width : cursorX;
+        const dx = left - box.left;
+        const dy = cursorY - box.top;
+        compactUnits[index].forEach(id => {
+          const node = placedById.get(idMap.get(id)!)!;
+          node.x += dx;
+          node.y += dy;
+        });
+        cursorX += reverse ? -width - 180 : width + 180;
+      });
+      cursorY += rowHeight + 180;
+    });
+  }
+
+  const subgraphNodes: CanvasNode[] = [];
+  for (const group of parsedSource.groups || []) {
+    const members = parsedSource.nodes
+      .filter(node => node.subgraph === group.id)
+      .map(node => placedById.get(idMap.get(node.id)!))
+      .filter((node): node is CanvasNode => Boolean(node));
+    if (!members.length) {
+      diagnostics.push({ line: 1, column: 1, endColumn: 1, severity: 'error', code: 'empty-subgraph', message: `Subgraph ${group.id} contains no shapes.`, source: group.label });
+      continue;
+    }
+    const left = Math.min(...members.map(node => node.x)) - 40;
+    const top = Math.min(...members.map(node => node.y)) - 56;
+    const right = Math.max(...members.map(node => node.x + node.width!)) + 40;
+    const bottom = Math.max(...members.map(node => node.y + node.height!)) + 40;
+    subgraphNodes.push({
+      id: `group-${Date.now()}-${subgraphNodes.length}`,
+      type: 'subgraph', label: group.label,
+      x: left, y: top,
+      width: right - left, height: bottom - top,
+      customWidth: right - left, customHeight: bottom - top,
+      subgraphId: group.id,
+    });
+  }
+  finalNodes.unshift(...subgraphNodes);
 
   // Map final node details for smart geometric port selection
   const canvasNodeMap = new Map<string, CanvasNode>();
@@ -522,6 +725,45 @@ export const parseCodeToDiagram = (
             targetHandle = 'bottom';
           }
         }
+      } else if (srcId !== tgtId) {
+        const sourceRight = srcNode.x + (srcNode.width || 0);
+        const targetRight = tgtNode.x + (tgtNode.width || 0);
+        const sourceBottom = srcNode.y + (srcNode.height || 0);
+        const targetBottom = tgtNode.y + (tgtNode.height || 0);
+        if (isHorizontal) {
+          if (tgtNode.x >= sourceRight + 20) {
+            sourceHandle = 'right'; targetHandle = 'left';
+          } else if (srcNode.x >= targetRight + 20) {
+            sourceHandle = 'left'; targetHandle = 'right';
+          } else if (dy >= 0) {
+            sourceHandle = 'bottom'; targetHandle = 'top';
+          } else {
+            sourceHandle = 'top'; targetHandle = 'bottom';
+          }
+        } else if (tgtNode.y >= sourceBottom + 20) {
+          sourceHandle = 'bottom'; targetHandle = 'top';
+        } else if (srcNode.y >= targetBottom + 20) {
+          sourceHandle = 'top'; targetHandle = 'bottom';
+        } else if (dx >= 0) {
+          sourceHandle = 'right'; targetHandle = 'left';
+        } else {
+          sourceHandle = 'left'; targetHandle = 'right';
+        }
+      }
+      if (effectiveDir === 'COMPACT') {
+        const sourceCenterX = srcNode.x + srcNode.width! / 2;
+        const sourceCenterY = srcNode.y + srcNode.height! / 2;
+        const targetCenterX = tgtNode.x + tgtNode.width! / 2;
+        const targetCenterY = tgtNode.y + tgtNode.height! / 2;
+        const dx = targetCenterX - sourceCenterX;
+        const dy = targetCenterY - sourceCenterY;
+        if (Math.abs(dx) > Math.abs(dy) || (srcNode.subgraphId !== tgtNode.subgraphId && Math.abs(dx) > 100)) {
+          sourceHandle = dx >= 0 ? 'right' : 'left';
+          targetHandle = dx >= 0 ? 'left' : 'right';
+        } else {
+          sourceHandle = dy >= 0 ? 'bottom' : 'top';
+          targetHandle = dy >= 0 ? 'top' : 'bottom';
+        }
       }
     }
 
@@ -538,6 +780,47 @@ export const parseCodeToDiagram = (
       targetMarker: e.targetMarker
     });
   });
+
+  if (effectiveDir === 'COMPACT') {
+    const handles = ['top', 'right', 'bottom', 'left'] as const;
+    const routeScore = (edge: CanvasEdge) => {
+      const path = calculateEdgePath(edge, finalNodes, canvasNodeMap, { skipSearch: true });
+      const points = getEdgePathPoints(path);
+      const blocked = points.slice(1).reduce((count, point, index) =>
+        count + Number(isSegmentBlocked(points[index], point, finalNodes, edge.source, edge.target)), 0);
+      const length = points.slice(1).reduce((total, point, index) =>
+        total + Math.abs(point.x - points[index].x) + Math.abs(point.y - points[index].y), 0);
+      return { blocked, length };
+    };
+    for (const edge of finalEdges) {
+      let best = routeScore(edge);
+      if (best.blocked === 0) continue;
+      let sourceHandle = edge.sourceHandle;
+      let targetHandle = edge.targetHandle;
+      for (const source of handles) for (const target of handles) {
+        const candidate = routeScore({ ...edge, sourceHandle: source, targetHandle: target });
+        if (candidate.blocked < best.blocked || (candidate.blocked === best.blocked && candidate.length < best.length)) {
+          best = candidate;
+          sourceHandle = source;
+          targetHandle = target;
+        }
+      }
+      edge.sourceHandle = sourceHandle;
+      edge.targetHandle = targetHandle;
+    }
+  }
+
+  if (finalNodes.length !== parsedSource.nodes.length + (parsedSource.groups?.length || 0) || finalEdges.length !== parsedSource.edges.length) {
+    diagnostics.push({
+      line: 1,
+      column: 1,
+      endColumn: 1,
+      severity: 'error',
+      code: 'incomplete-conversion',
+      message: 'Some parsed shapes or connections could not be placed on the canvas.',
+      source: rawCode.split(/\r?\n/, 1)[0] || '',
+    });
+  }
 
   return {
     nodes: finalNodes,
@@ -558,12 +841,14 @@ export const diagramToMermaid = (
   preferErDiagram = false
 ): string => {
   if (nodes.length === 0) {
-    return 'flowchart ' + direction + '\n  %% Empty canvas';
+    return 'flowchart ' + (direction === 'COMPACT' ? 'TD' : direction) + '\n  %% Empty canvas';
   }
 
   // Check if canvas is primarily an ER diagram
-  const tableNodes = nodes.filter(n => n.type === 'table');
-  const isEr = preferErDiagram || (tableNodes.length > 0 && tableNodes.length >= nodes.length / 2);
+  const contentNodes = nodes.filter(n => n.type !== 'subgraph');
+  const groupNodes = nodes.filter(n => n.type === 'subgraph');
+  const tableNodes = contentNodes.filter(n => n.type === 'table');
+  const isEr = preferErDiagram || (tableNodes.length > 0 && tableNodes.length >= contentNodes.length / 2);
 
   if (isEr && tableNodes.length > 0) {
     const lines: string[] = ['erDiagram'];
@@ -629,7 +914,7 @@ export const diagramToMermaid = (
   }
 
   // Standard Flowchart Generation
-  const lines: string[] = [`flowchart ${direction}`];
+  const lines: string[] = [`flowchart ${direction === 'COMPACT' ? 'TD' : direction}`];
 
   // Helper to create safe Mermaid node representation
   const formatMermaidNode = (node: CanvasNode, alias: string): string => {
@@ -663,7 +948,7 @@ export const diagramToMermaid = (
   // Map each node ID to a clean alias e.g. A, B, C, N1, N2...
   const aliasMap = new Map<string, string>();
   const usedAliases = new Set<string>();
-  nodes.forEach((node, idx) => {
+  contentNodes.forEach((node, idx) => {
     let cleanAlias = node.label.replace(/[^a-zA-Z0-9]/g, '');
     if (!/^[a-zA-Z]/.test(cleanAlias) || cleanAlias.length > 8 || usedAliases.has(cleanAlias)) {
       cleanAlias = `Node${idx + 1}`;
@@ -673,17 +958,26 @@ export const diagramToMermaid = (
     aliasMap.set(node.id, cleanAlias);
   });
 
-  // Track nodes that appear in edges
-  const connectedNodeIds = new Set<string>();
+  // Declare membership before edges, because cross-section edges can appear
+  // anywhere in the source without changing which section owns a node.
+  contentNodes.filter(node => !node.subgraphId).forEach(node => {
+    lines.push(`    ${formatMermaidNode(node, aliasMap.get(node.id)!)}`);
+  });
+  groupNodes.forEach((group, index) => {
+    const groupId = group.subgraphId || `Group${index + 1}`;
+    const label = (group.label || groupId).replace(/"/g, "'");
+    lines.push(`    subgraph ${groupId}["${label}"]`);
+    contentNodes.filter(node => node.subgraphId === groupId).forEach(node => {
+      lines.push(`        ${formatMermaidNode(node, aliasMap.get(node.id)!)}`);
+    });
+    lines.push('    end');
+  });
 
   // 1. Generate Edges
   edges.forEach(edge => {
-    const srcNode = nodes.find(n => n.id === edge.source);
-    const tgtNode = nodes.find(n => n.id === edge.target);
+    const srcNode = contentNodes.find(n => n.id === edge.source);
+    const tgtNode = contentNodes.find(n => n.id === edge.target);
     if (!srcNode || !tgtNode) return;
-
-    connectedNodeIds.add(srcNode.id);
-    connectedNodeIds.add(tgtNode.id);
 
     const srcAlias = aliasMap.get(srcNode.id)!;
     const tgtAlias = aliasMap.get(tgtNode.id)!;
@@ -705,12 +999,15 @@ export const diagramToMermaid = (
     lines.push(`    ${srcFormatted} ${connector} ${tgtFormatted}`);
   });
 
-  // 2. Declare standalone disconnected nodes
-  nodes.forEach(node => {
-    if (!connectedNodeIds.has(node.id)) {
-      const alias = aliasMap.get(node.id)!;
-      lines.push(`    ${formatMermaidNode(node, alias)}`);
-    }
+  // Preserve colors that Mermaid can represent when code is exported again.
+  const validColor = (color: string | undefined) => Boolean(color && (/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) || color === 'transparent'));
+  contentNodes.forEach(node => {
+    const styles: string[] = [];
+    if (validColor(node.fillColor)) styles.push(`fill:${node.fillColor}`);
+    if (validColor(node.borderColor) && node.borderColor !== 'transparent') styles.push(`stroke:${node.borderColor}`);
+    if (validColor(node.textColor) && node.textColor !== 'transparent') styles.push(`color:${node.textColor}`);
+    if (node.borderWidth) styles.push(`stroke-width:${node.borderWidth}px`);
+    if (styles.length) lines.push(`    style ${aliasMap.get(node.id)!} ${styles.join(',')}`);
   });
 
   return lines.join('\n');

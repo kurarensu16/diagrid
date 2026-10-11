@@ -21,7 +21,11 @@ export interface ParsedNodeInfo {
   fields?: string[];
   role?: string;
   subgraph?: string;
+  section?: number;
   colorHint?: string;
+  fillColor?: string;
+  borderColor?: string;
+  textColor?: string;
 }
 
 export interface ParsedEdgeInfo {
@@ -39,6 +43,7 @@ export interface ParsedDiagramSource {
   direction: LayoutDirection;
   nodes: ParsedNodeInfo[];
   edges: ParsedEdgeInfo[];
+  groups?: Array<{ id: string; label: string }>;
   diagnostics: CodeDiagnostic[];
 }
 
@@ -255,6 +260,107 @@ const parseGenericConnector = (lineText: string): {
   return null;
 };
 
+interface FlowchartConnector {
+  label?: string;
+  style: 'solid' | 'dashed';
+  arrow: 'end' | 'none' | 'both';
+}
+
+/** Finds connectors only outside quoted labels and shape delimiters. */
+const splitFlowchartStatement = (text: string): { groups: string[]; connectors: FlowchartConnector[] } | null => {
+  const groups: string[] = [];
+  const connectors: FlowchartConnector[] = [];
+  const closing = new Map([['[', ']'], ['(', ')'], ['{', '}']]);
+  const stack: string[] = [];
+  let quote: string | null = null;
+  let start = 0;
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote && text[index - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (closing.has(char)) { stack.push(closing.get(char)!); continue; }
+    if (stack.length && char === stack[stack.length - 1]) { stack.pop(); continue; }
+    if (stack.length) continue;
+
+    const remainder = text.slice(index);
+    const pipe = remainder.match(/^(-->|-\.->|==>)\|([^|]*)\|/);
+    const middle = remainder.match(/^(--\s+(.+?)\s+-->|-\.\s+(.+?)\s+\.->|==\s+(.+?)\s+==>)/);
+    const plain = remainder.match(/^(<-->|-\.->|-->|==>|---|->)/);
+    const token = pipe?.[0] || middle?.[0] || plain?.[0];
+    if (!token) continue;
+    const group = text.slice(start, index).trim();
+    if (!group) return null;
+    groups.push(group);
+    const symbol = pipe?.[1] || token;
+    connectors.push({
+      label: stripQuotes(pipe?.[2] || middle?.[2] || middle?.[3] || middle?.[4] || '') || undefined,
+      style: symbol.startsWith('-.') ? 'dashed' : 'solid',
+      arrow: symbol === '---' ? 'none' : symbol === '<-->' ? 'both' : 'end',
+    });
+    index += token.length - 1;
+    start = index + 1;
+  }
+  if (!connectors.length) return null;
+  const finalGroup = text.slice(start).trim();
+  if (!finalGroup) return null;
+  groups.push(finalGroup);
+  return { groups, connectors };
+};
+
+const splitFlowchartGroup = (group: string): string[] => {
+  const tokens: string[] = [];
+  const closing = new Map([['[', ']'], ['(', ')'], ['{', '}']]);
+  const stack: string[] = [];
+  let quote: string | null = null;
+  let start = 0;
+  for (let index = 0; index < group.length; index++) {
+    const char = group[index];
+    if (quote) {
+      if (char === quote && group[index - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (closing.has(char)) { stack.push(closing.get(char)!); continue; }
+    if (stack.length && char === stack[stack.length - 1]) { stack.pop(); continue; }
+    if (char === '&' && !stack.length) {
+      tokens.push(group.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  tokens.push(group.slice(start).trim());
+  return tokens;
+};
+
+interface FlowchartColors {
+  fillColor?: string;
+  borderColor?: string;
+  textColor?: string;
+  borderWidth?: 1 | 2 | 3;
+}
+
+const parseFlowchartColors = (text: string): FlowchartColors | null => {
+  const colors: FlowchartColors = {};
+  for (const declaration of text.split(',')) {
+    const width = declaration.trim().match(/^stroke-width\s*:\s*([123])px$/i);
+    if (width) {
+      colors.borderWidth = Number(width[1]) as 1 | 2 | 3;
+      continue;
+    }
+    const match = declaration.trim().match(/^(fill|stroke|color)\s*:\s*(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|transparent)$/i);
+    if (!match) return null;
+    const value = match[2];
+    if (match[1].toLowerCase() === 'fill') colors.fillColor = value;
+    else if (match[1].toLowerCase() === 'stroke' && value !== 'transparent') colors.borderColor = value;
+    else if (match[1].toLowerCase() === 'color' && value !== 'transparent') colors.textColor = value;
+    else return null;
+  }
+  return colors.fillColor || colors.borderColor || colors.textColor || colors.borderWidth ? colors : null;
+};
+
 export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDirection = 'LR'): ParsedDiagramSource => {
   const lines = sourceLines(rawCode);
   const syntax = detectDiagramSyntax(rawCode);
@@ -266,8 +372,12 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
 
   const first = lines[0].text;
   if (/^(flowchart|graph)\b/i.test(first)) {
+    if (!/^(flowchart|graph)(?:\s+(?:LR|TD|TB|RL|BT))?$/i.test(first)) {
+      diagnostics.push(diagnostic(lines[0], 'invalid-header', 'Flowchart header has an unsupported direction or extra content.', 'error', 'Use flowchart LR or flowchart TD.'));
+    }
     if (/\b(TD|TB)\b/i.test(first)) direction = 'TD';
-    else if (/\b(LR|RL)\b/i.test(first)) direction = 'LR';
+    else if (/\bLR\b/i.test(first)) direction = 'LR';
+    else if (/\b(RL|BT)\b/i.test(first)) diagnostics.push(diagnostic(lines[0], 'unsupported-direction', 'Reverse flowchart directions are not supported.', 'error', 'Use flowchart LR or flowchart TD.'));
     else diagnostics.push(diagnostic(lines[0], 'missing-direction', 'Flowchart direction is missing or unsupported.', 'warning', 'Use flowchart LR or flowchart TD.'));
   } else if (/^dfdDiagram\b/i.test(first)) {
     if (/\b(TD|TB)\b/i.test(first)) direction = 'TD';
@@ -351,7 +461,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
         edges.push({ source, target, label: message[4].trim(), style: message[2].startsWith('--') ? 'dashed' : 'solid' });
         continue;
       }
-      diagnostics.push(diagnostic(line, 'unsupported-sequence-statement', 'Unsupported sequence diagram statement.', 'warning', 'Supported statements are participant, actor, and Sender->>Receiver: Message.'));
+      diagnostics.push(diagnostic(line, 'unsupported-sequence-statement', 'Unsupported sequence diagram statement.', 'error', 'Supported statements are participant, actor, and Sender->>Receiver: Message.'));
     }
     return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
   }
@@ -379,7 +489,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
       if (currentTable && (entityStart || /^[-*]\s*/.test(line.text))) {
         const cleaned = line.text.replace(/^[-*]\s*/, '').replace(/[,;]/g, '').trim();
         const parts = cleaned.split(/\s+/);
-        if (parts.length < 2) diagnostics.push(diagnostic(line, 'invalid-field', 'A field needs a type and name.', 'warning', entityStart ? 'Use: string email' : 'Use: - email string'));
+        if (parts.length < 2) diagnostics.push(diagnostic(line, 'invalid-field', 'A field needs a type and name.', 'error', entityStart ? 'Use: string email' : 'Use: - email string'));
         else {
           const [firstPart, secondPart, ...badges] = parts;
           const [name, type] = entityStart ? [secondPart, firstPart] : [firstPart, secondPart];
@@ -407,7 +517,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
         edges.push({ source, target, label: (erRel[4] || erRel[5] || '').trim(), ...relationship });
         continue;
       }
-      diagnostics.push(diagnostic(line, 'unsupported-er-statement', 'Unsupported ER diagram statement.', 'warning', 'Use an entity block, Table: Name, or a relationship.'));
+      diagnostics.push(diagnostic(line, 'unsupported-er-statement', 'Unsupported ER diagram statement.', 'error', 'Use an entity block, Table: Name, or a relationship.'));
     }
     if (entityStart) diagnostics.push(diagnostic(entityStart, 'unclosed-entity', 'Entity block is missing a closing brace.', 'error', 'Add } after the last field.'));
     return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
@@ -455,7 +565,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
         continue;
       }
 
-      diagnostics.push(diagnostic(line, 'unsupported-dfd-statement', 'Unsupported DFD statement.', 'warning', 'Use entity, process, store, or Source --> Target : Label.'));
+      diagnostics.push(diagnostic(line, 'unsupported-dfd-statement', 'Unsupported DFD statement.', 'error', 'Use entity, process, store, or Source --> Target : Label.'));
     }
     return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
   }
@@ -502,7 +612,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
         continue;
       }
 
-      diagnostics.push(diagnostic(line, 'unsupported-usecase-statement', 'Unsupported Use Case statement.', 'warning', 'Use actor, usecase, boundary, or Actor --> Usecase.'));
+      diagnostics.push(diagnostic(line, 'unsupported-usecase-statement', 'Unsupported Use Case statement.', 'error', 'Use actor, usecase, boundary, or Actor --> Usecase.'));
     }
     return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
   }
@@ -579,7 +689,7 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
         continue;
       }
 
-      diagnostics.push(diagnostic(line, 'unsupported-activity-statement', 'Unsupported Activity diagram statement.', 'warning', 'Use start, end, action, decision, fork, join, or Step --> Next.'));
+      diagnostics.push(diagnostic(line, 'unsupported-activity-statement', 'Unsupported Activity diagram statement.', 'error', 'Use start, end, action, decision, fork, join, or Step --> Next.'));
     }
     return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
   }
@@ -587,13 +697,19 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
   // Flowchart parsing
   let currentSubgraph: string | null = null;
   let subgraphStart: SourceLine | null = null;
-  const arrowSplitRegex = /(\s*(?:--\s*.*?\s*-->|-\.\s*.*?\s*\.->|==\s*.*?\s*==>|-->\|.*?\||-\.->\|.*?\||==>\|.*?\||-->|-\.->|==>|---|->|<-->)\s*)/g;
+  const groups: Array<{ id: string; label: string }> = [];
+  const classDefinitions = new Map<string, FlowchartColors>();
+  const classAssignments: Array<{ nodeIds: string[]; className: string; line: SourceLine }> = [];
+  const directStyles: Array<{ nodeId: string; colors: FlowchartColors; line: SourceLine }> = [];
+  const inlineClassLines = new Map<string, SourceLine>();
   for (const line of lines) {
     if (/^(flowchart|graph)\b/i.test(line.text)) continue;
     const subgraph = line.text.match(/^subgraph\s+([a-zA-Z0-9_.-]+)(?:\s*\[(.*?)\])?/i);
     if (subgraph) {
-      if (currentSubgraph) diagnostics.push(diagnostic(line, 'nested-subgraph', 'Nested subgraphs are not supported.', 'warning'));
-      currentSubgraph = subgraph[2] ? stripQuotes(subgraph[2]) : subgraph[1];
+      if (currentSubgraph) diagnostics.push(diagnostic(line, 'nested-subgraph', 'Nested subgraphs are not supported.', 'error'));
+      if (groups.some(group => group.id === subgraph[1])) diagnostics.push(diagnostic(line, 'duplicate-subgraph', `Subgraph ID is repeated: ${subgraph[1]}.`, 'error'));
+      currentSubgraph = subgraph[1];
+      groups.push({ id: subgraph[1], label: subgraph[2] ? stripQuotes(subgraph[2]) : subgraph[1] });
       subgraphStart = line;
       continue;
     }
@@ -603,42 +719,109 @@ export const parseDiagramSource = (rawCode: string, fallbackDirection: LayoutDir
       subgraphStart = null;
       continue;
     }
-    if (/^(classDef|style|class|linkStyle|click|accTitle|accDescr)\s+/i.test(line.text)) continue;
-    const parts = line.text.split(arrowSplitRegex).filter(part => part?.trim());
-    if (parts.length >= 3) {
-      let previous: ParsedNodeInfo[] = [];
-      let malformed = false;
-      for (let index = 0; index < parts.length; index += 2) {
-        const tokens = parts[index].trim().split('&').map(token => parseCheckedNode(token.trim(), line)).filter((node): node is ParsedNodeInfo => Boolean(node));
-        if (!tokens.length) { malformed = true; break; }
-        for (const node of tokens) {
-          ensureNode(node.id, node.label, node.type, undefined, node.label !== node.id || node.type !== 'process', node.colorHint);
-          if (currentSubgraph) nodeMap.get(node.id)!.subgraph = currentSubgraph;
-        }
-        if (previous.length && index > 0) {
-          const connector = parts[index - 1].trim();
-          const pipe = connector.match(/(?:-->|-\.->|==>)\|(.*?)\|/);
-          const middle = connector.match(/(?:--|-\.|==)\s*(.*?)\s*(?:-->|\.->|==>)/);
-          const label = pipe?.[1]?.trim() || middle?.[1]?.trim() || undefined;
-          const style = connector.startsWith('-.') ? 'dashed' : 'solid';
-          const arrow = connector === '---' ? 'none' : connector.includes('<-->') ? 'both' : 'end';
-          previous.forEach(source => tokens.forEach(target => edges.push({ source: source.id, target: target.id, label, style, arrow })));
-        }
-        previous = tokens;
-      }
-      if (!malformed) continue;
+    if (/^classDef\b/i.test(line.text)) {
+      const match = line.text.match(/^classDef\s+([a-zA-Z0-9_-]+)\s+(.+)$/i);
+      const colors = match && parseFlowchartColors(match[2]);
+      if (!match || !colors) diagnostics.push(diagnostic(line, 'unsupported-style', 'Class definition supports hexadecimal colors and stroke-width from 1px to 3px.', 'error', 'Use classDef name fill:#ffffff,stroke:#15191c,color:#15191c,stroke-width:2px.'));
+      else classDefinitions.set(match[1], colors);
+      continue;
     }
-    if (/^[a-zA-Z0-9_.-]+\s*(\[|\(|\{|>)/.test(line.text)) {
+    if (/^class\b/i.test(line.text)) {
+      const match = line.text.match(/^class\s+([a-zA-Z0-9_.-]+(?:\s*,\s*[a-zA-Z0-9_.-]+)*)\s+([a-zA-Z0-9_-]+)$/i);
+      if (!match) diagnostics.push(diagnostic(line, 'unsupported-style', 'Invalid class assignment.', 'error', 'Use class A,B name.'));
+      else classAssignments.push({ nodeIds: match[1].split(',').map(id => id.trim()), className: match[2], line });
+      continue;
+    }
+    if (/^style\b/i.test(line.text)) {
+      const match = line.text.match(/^style\s+([a-zA-Z0-9_.-]+)\s+(.+)$/i);
+      const colors = match && parseFlowchartColors(match[2]);
+      if (!match || !colors) diagnostics.push(diagnostic(line, 'unsupported-style', 'Node style supports hexadecimal colors and stroke-width from 1px to 3px.', 'error', 'Use style A fill:#ffffff,stroke:#15191c,color:#15191c,stroke-width:2px.'));
+      else directStyles.push({ nodeId: match[1], colors, line });
+      continue;
+    }
+    if (/^(linkStyle|click)\b/i.test(line.text)) {
+      diagnostics.push(diagnostic(line, 'unsupported-style', 'Link styling and interactions cannot be represented on the canvas.', 'error'));
+      continue;
+    }
+    if (/^(accTitle|accDescr)\s+/i.test(line.text)) {
+      diagnostics.push(diagnostic(line, 'ignored-metadata', 'Accessibility metadata is not imported.', 'warning'));
+      continue;
+    }
+    const chain = splitFlowchartStatement(line.text);
+    if (chain) {
+      const parsedGroups = chain.groups.map(group => splitFlowchartGroup(group).map(token => parseCheckedNode(token, line)));
+      if (parsedGroups.some(group => group.some(node => !node))) continue;
+      for (const group of parsedGroups) {
+        for (const node of group as ParsedNodeInfo[]) {
+          const known = nodeMap.has(node.id);
+          ensureNode(node.id, node.label, node.type, undefined, node.label !== node.id || node.type !== 'process', node.colorHint);
+          if (node.colorHint) inlineClassLines.set(node.id, line);
+          if (!known) {
+            nodeMap.get(node.id)!.section = currentSubgraph ? groups.length * 2 - 1 : groups.length * 2;
+            if (currentSubgraph) nodeMap.get(node.id)!.subgraph = currentSubgraph;
+          } else if (currentSubgraph && !nodeMap.get(node.id)!.subgraph) {
+            nodeMap.get(node.id)!.section = groups.length * 2 - 1;
+            nodeMap.get(node.id)!.subgraph = currentSubgraph;
+          }
+        }
+      }
+      chain.connectors.forEach((connector, index) => {
+        for (const source of parsedGroups[index] as ParsedNodeInfo[]) {
+          for (const target of parsedGroups[index + 1] as ParsedNodeInfo[]) {
+            edges.push({ source: source.id, target: target.id, ...connector });
+          }
+        }
+      });
+      continue;
+    }
+    if (/^[a-zA-Z0-9_.-]+\s*(\[|\(|\{|>|$)/.test(line.text)) {
       const node = parseCheckedNode(line.text, line);
       if (node) {
+        const known = nodeMap.has(node.id);
         ensureNode(node.id, node.label, node.type, undefined, true, node.colorHint);
-        if (currentSubgraph) nodeMap.get(node.id)!.subgraph = currentSubgraph;
+        if (node.colorHint) inlineClassLines.set(node.id, line);
+        if (!known) {
+          nodeMap.get(node.id)!.section = currentSubgraph ? groups.length * 2 - 1 : groups.length * 2;
+          if (currentSubgraph) nodeMap.get(node.id)!.subgraph = currentSubgraph;
+        } else if (currentSubgraph && !nodeMap.get(node.id)!.subgraph) {
+          nodeMap.get(node.id)!.section = groups.length * 2 - 1;
+          nodeMap.get(node.id)!.subgraph = currentSubgraph;
+        }
       }
       continue;
     }
     const arrowOffset = line.text.search(/<?[-=.]+>?/);
-    diagnostics.push(diagnostic(line, arrowOffset >= 0 ? 'invalid-connector' : 'unsupported-flowchart-statement', arrowOffset >= 0 ? 'Malformed or incomplete connector.' : 'Unsupported flowchart statement.', arrowOffset >= 0 ? 'error' : 'warning', arrowOffset >= 0 ? 'Use A --> B, A -.-> B, or A --- B.' : 'Use a node such as A[Label] or a connector such as A --> B.', Math.max(0, arrowOffset)));
+    diagnostics.push(diagnostic(line, arrowOffset >= 0 ? 'invalid-connector' : 'unsupported-flowchart-statement', arrowOffset >= 0 ? 'Malformed or incomplete connector.' : 'Unsupported flowchart statement.', 'error', arrowOffset >= 0 ? 'Use A --> B, A -.-> B, or A --- B.' : 'Use a node such as A[Label] or a connector such as A --> B.', Math.max(0, arrowOffset)));
   }
   if (subgraphStart) diagnostics.push(diagnostic(subgraphStart, 'unclosed-subgraph', 'Subgraph is missing its end statement.', 'error', 'Add end after the final subgraph node.'));
-  return { syntax, direction, nodes: [...nodeMap.values()], edges, diagnostics };
+  const builtInClasses = new Set(['blue', 'blueprint', 'red', 'signal', 'green', 'emerald', 'amber', 'purple', 'gray', 'white', 'paper']);
+  const applyClass = (node: ParsedNodeInfo, className: string, line?: SourceLine) => {
+    const colors = classDefinitions.get(className);
+    if (colors) {
+      node.colorHint = undefined;
+      node.role = undefined;
+      Object.assign(node, colors);
+    } else if (!builtInClasses.has(className.toLowerCase())) {
+      diagnostics.push(diagnostic(line || lines[0], 'unknown-class', `Undefined node class: ${className}.`, 'error', 'Define it with classDef or use a built-in color class.'));
+    } else {
+      node.colorHint = className.toLowerCase();
+    }
+  };
+  for (const node of nodeMap.values()) {
+    if (classDefinitions.has('default')) Object.assign(node, classDefinitions.get('default'));
+    if (node.colorHint) applyClass(node, node.colorHint, inlineClassLines.get(node.id));
+  }
+  for (const assignment of classAssignments) {
+    for (const id of assignment.nodeIds) {
+      const node = nodeMap.get(id);
+      if (!node) diagnostics.push(diagnostic(assignment.line, 'unknown-style-node', `Class refers to unknown node: ${id}.`, 'error'));
+      else applyClass(node, assignment.className, assignment.line);
+    }
+  }
+  for (const style of directStyles) {
+    const node = nodeMap.get(style.nodeId);
+    if (!node) diagnostics.push(diagnostic(style.line, 'unknown-style-node', `Style refers to unknown node: ${style.nodeId}.`, 'error'));
+    else Object.assign(node, style.colors);
+  }
+  return { syntax, direction, nodes: [...nodeMap.values()], edges, groups, diagnostics };
 };

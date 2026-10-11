@@ -30,7 +30,10 @@ const slimifyContent = (contentStr: string): string => {
       if (n.fields && n.fields.length > 0) slim.fields = n.fields;
       if (n.customWidth) slim.customWidth = n.customWidth;
       if (n.customHeight) slim.customHeight = n.customHeight;
-      if (n.fillColor && n.fillColor !== 'transparent') slim.fillColor = n.fillColor;
+      if (n.subgraphId) slim.subgraphId = n.subgraphId;
+      if (n.fillColor) slim.fillColor = n.fillColor;
+      if (n.borderColor) slim.borderColor = n.borderColor;
+      if (n.textColor) slim.textColor = n.textColor;
       if (n.shadowAccent && n.shadowAccent !== 'none') slim.shadowAccent = n.shadowAccent;
       if (n.borderStyle && n.borderStyle !== 'solid') slim.borderStyle = n.borderStyle;
       if (n.borderWidth && n.borderWidth !== 2) slim.borderWidth = n.borderWidth;

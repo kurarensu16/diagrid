@@ -41,6 +41,7 @@ export interface BoundingBox {
 
 // Default dimensions per shape type
 const getDefaultDimensions = (node: CanvasNode): { width: number; height: number } => {
+  if (node.type === 'subgraph') return { width: 360, height: 300 };
   if (node.type === 'table') {
     const fieldCount = node.fields?.length || 0;
     return { width: 180, height: Math.max(48, 32 + fieldCount * 24) };
@@ -189,7 +190,8 @@ export const generateStandaloneSvg = (
     const isNoBorder = node.borderStyle === 'none';
     const strokeWidth = isNoBorder ? 0 : (node.borderWidth || 2);
     const strokeDash = node.borderStyle === 'dashed' ? 'stroke-dasharray="6 4"' : node.borderStyle === 'dotted' ? 'stroke-dasharray="2 3"' : '';
-    const strokeColor = isNoBorder ? 'none' : (isDark ? '#E1E5E3' : '#15191C');
+    const strokeColor = isNoBorder ? 'none' : (node.borderColor || (isDark ? '#E1E5E3' : '#15191C'));
+    const textColor = node.textColor || (isDark ? '#FFFFFF' : '#15191C');
 
     // Determine typography attributes
     const fontSize = node.customFontSize || (node.fontSize === 'sm' ? 10 : node.fontSize === 'lg' ? 15 : 12);
@@ -197,12 +199,19 @@ export const generateStandaloneSvg = (
     const textAnchor = node.textAlign === 'left' ? 'start' : node.textAlign === 'right' ? 'end' : 'middle';
     const textX = node.textAlign === 'left' ? 12 : node.textAlign === 'right' ? width - 12 : width / 2;
 
+    if (node.type === 'subgraph') {
+      return `<g id="${node.id}" transform="translate(${node.x}, ${node.y})">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="6 4" />
+        <text x="16" y="26" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="bold">${escapeXml(node.label)}</text>
+      </g>`;
+    }
+
     if (node.type === 'text') {
       const hasBorder = !isNoBorder && node.borderStyle;
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${(effectiveFill !== 'none' || hasBorder) ? `<rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="${hasBorder ? strokeColor : 'none'}" stroke-width="${strokeWidth}" ${strokeDash} />` : ''}
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+          <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -285,12 +294,12 @@ export const generateStandaloneSvg = (
           <polygon
             points="${cx},${node.y} ${node.x + width},${cy} ${cx},${node.y + height} ${node.x},${cy}"
             fill="${effectiveFill}"
-            stroke="#15191C"
+            stroke="${strokeColor}"
             stroke-width="${strokeWidth}"
             ${strokeDash}
           />
           <!-- Upright Centered Label Text -->
-          <text x="${cx}" y="${cy + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="middle">
+          <text x="${cx}" y="${cy + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="middle">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -301,8 +310,8 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" rx="${height / 2}" fill="${shadowColor}" />` : ''}
-          <rect x="0" y="0" width="${width}" height="${height}" rx="${height / 2}" fill="${effectiveFill}" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+          <rect x="0" y="0" width="${width}" height="${height}" rx="${height / 2}" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -340,8 +349,8 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" rx="12" fill="${shadowColor}" />` : ''}
-          <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+          <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -364,12 +373,12 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" rx="8" fill="${shadowColor}" />` : ''}
-          <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <line x1="0" y1="20" x2="${width}" y2="20" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="1.2" />
+          <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="0" y1="20" x2="${width}" y2="20" stroke="${strokeColor}" stroke-width="1.2" />
           <text x="${width / 2}" y="14" fill="${isDark ? '#9BA3A9' : '#5A666E'}" font-size="9" font-family="'JetBrains Mono', monospace" font-weight="bold" text-anchor="middle">
             ${escapeXml(processId)}
           </text>
-          <text x="${width / 2}" y="${height / 2 + 10}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="middle">
+          <text x="${width / 2}" y="${height / 2 + 10}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="middle">
             ${escapeXml(processName)}
           </text>
         </g>
@@ -379,18 +388,18 @@ export const generateStandaloneSvg = (
     if (node.type === 'dfd-store') {
       const { id: storeId, name: storeName } = parseDfdStoreLabel(node.label);
       const idWidth = 40;
-      const strokeColor = isDark ? '#E1E5E3' : '#15191C';
+      const storeStrokeColor = node.borderColor || (isDark ? '#E1E5E3' : '#15191C');
       const idFill = isDark ? '#15191C' : '#FFFFFF';
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           <!-- Gane & Sarson Open-Ended Store (No solid block shadow) -->
           <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" />
           <rect x="0" y="0" width="${idWidth}" height="${height}" fill="${idFill}" />
-          <path d="M ${width} 0 L 0 0 L 0 ${height} L ${width} ${height}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <line x1="${idWidth}" y1="0" x2="${idWidth}" y2="${height}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <path d="M ${width} 0 L 0 0 L 0 ${height} L ${width} ${height}" fill="none" stroke="${storeStrokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <line x1="${idWidth}" y1="0" x2="${idWidth}" y2="${height}" stroke="${storeStrokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
 
           <text x="${idWidth / 2}" y="${height / 2 + 4}" fill="${isDark ? '#9BA3A9' : '#525E65'}" font-size="10" font-family="'JetBrains Mono', monospace" font-weight="bold" text-anchor="middle">${escapeXml(storeId)}</text>
-          <text x="${idWidth + 10}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="start">${escapeXml(storeName)}</text>
+          <text x="${idWidth + 10}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="start">${escapeXml(storeName)}</text>
 
 
         </g>
@@ -401,9 +410,9 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" fill="${shadowColor}" />` : ''}
-          <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="${strokeWidth}" ${strokeDash} />
-          <rect x="3" y="3" width="${width - 6}" height="${height - 6}" fill="none" stroke="${isDark ? '#E1E5E3' : '#15191C'}" stroke-width="1" />
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+          <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <rect x="3" y="3" width="${width - 6}" height="${height - 6}" fill="none" stroke="${strokeColor}" stroke-width="1" />
+          <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -429,8 +438,8 @@ export const generateStandaloneSvg = (
       return `
         <g id="${node.id}" transform="translate(${node.x}, ${node.y})">
           ${shadowColor ? `<ellipse cx="${width / 2 + 4}" cy="${height / 2 + 4}" rx="${width / 2}" ry="${height / 2}" fill="${shadowColor}" />` : ''}
-          <ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${effectiveFill}" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
-          <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+          <ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+          <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
             ${escapeXml(node.label)}
           </text>
         </g>
@@ -455,8 +464,8 @@ export const generateStandaloneSvg = (
         <!-- Hard Shadow -->
         ${shadowColor ? `<rect x="4" y="4" width="${width}" height="${height}" fill="${shadowColor}" />` : ''}
         <!-- Outer Box -->
-        <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="#15191C" stroke-width="${strokeWidth}" ${strokeDash} />
-        <text x="${textX}" y="${height / 2 + 4}" fill="${isDark ? '#FFFFFF' : '#15191C'}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="${effectiveFill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${strokeDash} />
+        <text x="${textX}" y="${height / 2 + 4}" fill="${textColor}" font-size="${fontSize}" font-family="'JetBrains Mono', monospace" font-weight="${fontWeight}" text-anchor="${textAnchor}">
           ${escapeXml(node.label)}
         </text>
       </g>
